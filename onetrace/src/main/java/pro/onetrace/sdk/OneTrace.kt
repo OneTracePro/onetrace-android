@@ -9,6 +9,7 @@ import pro.onetrace.sdk.internal.Client
 import pro.onetrace.sdk.internal.DeviceContext
 import pro.onetrace.sdk.internal.EventQueue
 import pro.onetrace.sdk.internal.HttpTransport
+import pro.onetrace.sdk.internal.InAppPresenter
 import pro.onetrace.sdk.internal.Storage
 import java.io.File
 import java.util.concurrent.Executors
@@ -42,11 +43,13 @@ public object OneTrace {
         val transport = HttpTransport(config.apiUrl, config.writeKey, "onetrace-android/${BuildConfig.SDK_VERSION} (${app.packageName})")
         val queue = EventQueue(File(app.filesDir, "onetrace-queue.jsonl"), config.maxQueueSize)
         val created = Client(app, config, storage, queue, transport, executor, device)
+        val inApp = InAppPresenter(config.openPushLinks) { token, event, url -> created.reportInApp(token, event, url) }
+        created.presenter = inApp::present
         client = created
 
         created.appLaunched()
         created.start()
-        (app as? Application)?.let { AppLifecycle(created, config.trackActivityScreens).attach(it) }
+        (app as? Application)?.let { AppLifecycle(created, config.trackActivityScreens, inApp).attach(it) }
             ?: Log.w(Client.TAG, "OneTrace.init() needs the application context: lifecycle and push taps are not tracked")
     }
 
@@ -100,6 +103,21 @@ public object OneTrace {
     @JvmOverloads
     public fun setPushToken(token: String?, provider: PushProvider = PushProvider.FCM) {
         client?.setPushToken(token, provider.key)
+    }
+
+    /**
+     * Holds in-app messages back while true, for example during checkout; they are shown after it is set back to false
+     * and the app opens again or tracks their trigger event.
+     */
+    @JvmStatic
+    public fun pauseInAppMessages(paused: Boolean) {
+        client?.inAppPaused = paused
+    }
+
+    /** Asks OneTrace for in-app messages now; the SDK also does it when the app opens and after sending events. */
+    @JvmStatic
+    public fun fetchInAppMessages() {
+        client?.fetchInApp()
     }
 
     /** Call after the user answered the notification permission prompt: the platform learns whether push can be sent. */

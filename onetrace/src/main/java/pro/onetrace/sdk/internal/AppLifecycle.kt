@@ -11,7 +11,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
  * App foreground and background from the process lifecycle; activities for automatic screens and for taps on push
  * notifications, which open the launcher activity with the notification data in the intent extras.
  */
-internal class AppLifecycle(private val client: Client, private val trackScreens: Boolean) : DefaultLifecycleObserver, Application.ActivityLifecycleCallbacks {
+internal class AppLifecycle(private val client: Client, private val trackScreens: Boolean, private val inApp: InAppPresenter) : DefaultLifecycleObserver, Application.ActivityLifecycleCallbacks {
     private var started = false
 
     fun attach(application: Application) {
@@ -38,9 +38,9 @@ internal class AppLifecycle(private val client: Client, private val trackScreens
         }
     }
 
-    override fun onActivityResumed(activity: Activity) = Unit
+    override fun onActivityResumed(activity: Activity) = inApp.resumed(activity)
 
-    override fun onActivityPaused(activity: Activity) = Unit
+    override fun onActivityPaused(activity: Activity) = inApp.paused(activity)
 
     override fun onActivityStopped(activity: Activity) = Unit
 

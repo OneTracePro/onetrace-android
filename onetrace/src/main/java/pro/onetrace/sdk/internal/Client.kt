@@ -28,6 +28,17 @@ internal class Client(
     private val clock: () -> Long = System::currentTimeMillis,
     private val notificationsEnabled: () -> Boolean = { NotificationManagerCompat.from(context).areNotificationsEnabled() },
 ) {
+    /** Shows in-app messages; set by [pro.onetrace.sdk.OneTrace] (null in tests that do not need it). */
+    @Volatile
+    var presenter: ((JSONObject) -> Unit)? = null
+
+    /** In-app messages received but not shown yet (SDK thread only). */
+    private val inApp = mutableListOf<JSONObject>()
+    private val seen = LinkedHashSet<String>()
+
+    @Volatile
+    var inAppPaused = false
+
     fun start() {
         executor.scheduleWithFixedDelay({ flushNow() }, config.flushIntervalSeconds, config.flushIntervalSeconds, TimeUnit.SECONDS)
         run { registerNow(force = true) }
@@ -35,6 +46,7 @@ internal class Client(
 
     fun track(event: String, properties: Map<String, Any?>) = run {
         enqueue("track", JSONObject().put("event", event).put("properties", Json.obj(properties)))
+        presentInApp(event)
     }
 
     fun screen(name: String, properties: Map<String, Any?>) = run {
@@ -107,6 +119,9 @@ internal class Client(
         if (fromBackground) {
             registerNow(force = false)
         }
+
+        fetchInAppNow()
+        presentInApp(null)
     }
 
     fun appBackground() = run {
@@ -150,6 +165,19 @@ internal class Client(
         run { pushEventNow(token, "received", null) }
     }
 
+    /** Asks the platform for in-app messages now. */
+    fun fetchInApp() = run {
+        fetchInAppNow()
+        presentInApp(null)
+    }
+
+    fun reportInApp(token: String, event: String, url: String?) = run {
+        val body = JSONObject().put("token", token).put("event", event)
+        url?.let { body.put("url", it) }
+        val result = transport.post("/in-app/events", body)
+        log("In-app $event reported: HTTP ${result.status}")
+    }
+
     val anonymousId: String get() = storage.anonymousId
 
     val userId: String? get() = storage.userId
@@ -190,6 +218,11 @@ internal class Client(
                 result.successful -> {
                     queue.remove(batch.size)
                     log("Sent ${batch.size} events")
+                    // The events may have started a journey with an in-app message: pick it up.
+                    if (queue.size() == 0) {
+                        fetchInAppNow()
+                        presentInApp(null)
+                    }
                 }
                 // A wrong key: the events wait until a new app version fixes it.
                 result.status == 401 || result.status == 403 -> {
@@ -207,6 +240,46 @@ internal class Client(
                 }
             }
         }
+    }
+
+    private fun fetchInAppNow() {
+        val query = "anonymousId=${Uri.encode(storage.anonymousId)}&appId=${Uri.encode(device.packageName)}&platform=android"
+        val result = transport.get("/in-app/messages?$query")
+
+        if (!result.successful) {
+            log("In-app messages: HTTP ${result.status}")
+            return
+        }
+
+        val data = runCatching { JSONObject(result.body).optJSONArray("data") }.getOrNull() ?: return
+
+        for (i in 0 until data.length()) {
+            val message = data.optJSONObject(i) ?: continue
+            val token = message.optString("token")
+
+            if (token.isNotEmpty() && seen.add(token)) {
+                inApp.add(message)
+            }
+        }
+
+        while (seen.size > 200) {
+            seen.remove(seen.first())
+        }
+    }
+
+    /** Shows the next message for this moment: without a trigger after a fetch, or the one triggered by [event]. */
+    private fun presentInApp(event: String?) {
+        val show = presenter ?: return
+
+        if (inAppPaused) {
+            return
+        }
+
+        val matching = inApp.filter { (it.optString("trigger_event").takeIf { t -> t.isNotEmpty() && t != "null" }) == event }
+        // After a fetch every message without a trigger is shown, one after another; an event shows one message.
+        val shown = if (event == null) matching else matching.take(1)
+        inApp.removeAll(shown)
+        shown.forEach(show)
     }
 
     private fun registerNow(force: Boolean) {

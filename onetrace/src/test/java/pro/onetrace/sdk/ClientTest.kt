@@ -31,7 +31,14 @@ class ClientTest {
 
     private class FakeTransport : Transport {
         val requests = mutableListOf<Request>()
+        val gets = mutableListOf<String>()
         var status = 202
+        var inApp = "{\"data\": []}"
+
+        override fun get(path: String): HttpResult {
+            gets.add(path)
+            return HttpResult(200, inApp)
+        }
 
         override fun post(path: String, body: JSONObject): HttpResult {
             requests.add(Request(path, JSONObject(body.toString())))
@@ -205,5 +212,62 @@ class ClientTest {
         (1..5).forEach { queue.add(JSONObject().put("n", it)) }
 
         assertEquals(listOf(3, 4, 5), EventQueue(queueFile, 3).peek(10).map { it.getInt("n") })
+    }
+
+    @Test
+    fun showsInAppMessagesAfterAFetchOrAfterTheirTriggerEvent() {
+        val shown = mutableListOf<String>()
+        val client = client(flushAt = 100)
+        client.presenter = { shown.add(it.getString("title")) }
+        transport.inApp = JSONObject().put("data", org.json.JSONArray()
+            .put(JSONObject().put("token", "t1").put("title", "Welcome").put("trigger_event", JSONObject.NULL))
+            .put(JSONObject().put("token", "t2").put("title", "Cart reminder").put("trigger_event", "add_to_cart"))).toString()
+
+        client.fetchInApp()
+        client.fetchInApp()
+        drain()
+        assertEquals(listOf("Welcome"), shown)
+        assertTrue(transport.gets.first().startsWith("/in-app/messages?anonymousId=${storage.anonymousId}&appId=${app.packageName}&platform=android"))
+
+        client.track("product_viewed", emptyMap())
+        client.track("add_to_cart", emptyMap())
+        client.track("add_to_cart", emptyMap())
+        drain()
+        assertEquals(listOf("Welcome", "Cart reminder"), shown)
+
+        client.reportInApp("t2", "clicked", "shopapp://cart")
+        drain()
+        val event = transport.requests.single { it.path == "/in-app/events" }.body
+        assertEquals("clicked", event.getString("event"))
+        assertEquals("shopapp://cart", event.getString("url"))
+    }
+
+    @Test
+    fun presentsAnInAppMessageOverTheActivityAndReportsTheButton() {
+        val reports = mutableListOf<String>()
+        val presenter = pro.onetrace.sdk.internal.InAppPresenter(openLinks = true) { _, event, url -> reports.add("$event ${url ?: ""}".trim()) }
+        val activity = org.robolectric.Robolectric.buildActivity(android.app.Activity::class.java).setup().get()
+        presenter.resumed(activity)
+        presenter.present(JSONObject().put("token", "t1").put("layout", "modal").put("title", "Sale").put("body", "-20%")
+            .put("button_text", "Shop").put("button_url", "shopapp://sale").put("background_color", "#FFFFFF"))
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+
+        val dialog = presenter.current!!
+        assertTrue(dialog.isShowing)
+        assertEquals(listOf("shown"), reports)
+
+        val button = findButton(dialog.window!!.decorView, "Shop")!!
+        button.performClick()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+
+        assertEquals(listOf("shown", "clicked shopapp://sale"), reports)
+        assertFalse(dialog.isShowing)
+        assertEquals("shopapp://sale", shadowOf(activity).nextStartedActivity.data.toString())
+    }
+
+    private fun findButton(view: android.view.View, text: String): android.widget.Button? = when (view) {
+        is android.widget.Button -> view.takeIf { it.text.toString() == text }
+        is android.view.ViewGroup -> (0 until view.childCount).firstNotNullOfOrNull { findButton(view.getChildAt(it), text) }
+        else -> null
     }
 }
