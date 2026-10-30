@@ -221,6 +221,14 @@ internal class InAppPresenter(
             buttons.addView(Button(host).apply {
                 this.text = label
                 isAllCaps = false
+                // The app theme decides the default button size and padding: set them, the same in every app.
+                minWidth = 0
+                minimumWidth = 0
+                minHeight = 0
+                minimumHeight = 0
+                setPadding(dp(host, 18), dp(host, 10), dp(host, 18), dp(host, 10))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                stateListAnimator = null
                 setTextColor(color(message.optString("button_text_color"), Color.WHITE))
                 background = GradientDrawable().apply {
                     setColor(color(message.optString("button_color"), Color.parseColor("#4F46E5")))
