@@ -3,6 +3,8 @@ package pro.onetrace.sdk.internal
 import android.app.Activity
 import android.app.Application
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -14,9 +16,16 @@ import androidx.lifecycle.ProcessLifecycleOwner
 internal class AppLifecycle(private val client: Client, private val trackScreens: Boolean, private val inApp: InAppPresenter) : DefaultLifecycleObserver, Application.ActivityLifecycleCallbacks {
     private var started = false
 
+    /** Any thread: React Native calls the SDK from its native modules thread, the process lifecycle wants the main one. */
     fun attach(application: Application) {
         application.registerActivityLifecycleCallbacks(this)
-        ProcessLifecycleOwner.get().lifecycle.addObserver(this)
+        val observe = { ProcessLifecycleOwner.get().lifecycle.addObserver(this) }
+
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            observe()
+        } else {
+            Handler(Looper.getMainLooper()).post(observe)
+        }
     }
 
     override fun onStart(owner: LifecycleOwner) {

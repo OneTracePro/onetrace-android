@@ -22,7 +22,8 @@ import java.util.concurrent.Executors
 /**
  * OneTrace.pro for Android: events, screens and identities of app users, installations for mobile push.
  *
- * Call [init] once in `Application.onCreate()`; every other call is safe from any thread and does nothing before it.
+ * Call [init] once in `Application.onCreate()`; every call, [init] included, is safe from any thread, and the others do
+ * nothing before it.
  */
 public object OneTrace {
     @Volatile
@@ -173,7 +174,10 @@ public object OneTrace {
     @JvmStatic
     public val installationId: String? get() = client?.installationId
 
-    /** For the Flutter and React Native wrappers, before [init]: report the wrapper as the library. */
+    /**
+     * For the Flutter and React Native wrappers, before [init]: report the wrapper as the library — `flutter` becomes
+     * `onetrace-flutter` in the event context and `flutter 1.0.0` in the installation.
+     */
     @JvmStatic
     public fun setWrapper(name: String, version: String) {
         wrapper = name to version
