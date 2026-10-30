@@ -11,6 +11,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.TypedValue
@@ -23,6 +24,9 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -182,6 +186,19 @@ internal class InAppPresenter(
 
         return FrameLayout(host).apply {
             val margin = if (layout == "fullscreen") 0 else dp(host, 16)
+
+            // The window is drawn under the status and navigation bars: the message keeps clear of them, and a full
+            // screen message paints its color behind them.
+            if (layout == "fullscreen") {
+                setBackgroundColor(color(message.optString("background_color"), Color.WHITE))
+            }
+
+            ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
+                val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+                view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+                insets
+            }
+
             addView(card, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, if (layout == "fullscreen") ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 setMargins(margin, margin, margin, margin)
             })
@@ -191,6 +208,16 @@ internal class InAppPresenter(
     private fun window(window: Window?, layout: String, position: String) {
         window ?: return
         window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        @Suppress("DEPRECATION")
+        window.statusBarColor = Color.TRANSPARENT
+        @Suppress("DEPRECATION")
+        window.navigationBarColor = Color.TRANSPARENT
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
+        }
 
         when (layout) {
             "fullscreen" -> window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
