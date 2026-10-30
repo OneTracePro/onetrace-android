@@ -219,6 +219,14 @@ internal class InAppPresenter(
             window.isNavigationBarContrastEnforced = false
         }
 
+        // Dialog windows are laid out between the system bars unless told otherwise.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.attributes = window.attributes.apply {
+                fitInsetsTypes = 0
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            }
+        }
+
         when (layout) {
             "fullscreen" -> window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             "banner" -> {
