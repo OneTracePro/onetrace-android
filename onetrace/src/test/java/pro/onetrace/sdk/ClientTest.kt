@@ -1,0 +1,209 @@
+package pro.onetrace.sdk
+
+import android.app.Application
+import android.content.Intent
+import androidx.test.core.app.ApplicationProvider
+import org.json.JSONObject
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
+import pro.onetrace.sdk.internal.Client
+import pro.onetrace.sdk.internal.DeviceContext
+import pro.onetrace.sdk.internal.EventQueue
+import pro.onetrace.sdk.internal.HttpResult
+import pro.onetrace.sdk.internal.Storage
+import pro.onetrace.sdk.internal.Transport
+import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+
+@RunWith(RobolectricTestRunner::class)
+class ClientTest {
+    private class Request(val path: String, val body: JSONObject)
+
+    private class FakeTransport : Transport {
+        val requests = mutableListOf<Request>()
+        var status = 202
+
+        override fun post(path: String, body: JSONObject): HttpResult {
+            requests.add(Request(path, JSONObject(body.toString())))
+            return HttpResult(if (path == "/batch") status else 200, "{}")
+        }
+
+        fun batches() = requests.filter { it.path == "/batch" }.map { it.body.getJSONArray("batch") }
+
+        fun events() = batches().flatMap { batch -> (0 until batch.length()).map { batch.getJSONObject(it) } }
+
+        fun registrations() = requests.filter { it.path == "/devices" }.map { it.body }
+    }
+
+    private lateinit var app: Application
+    private lateinit var executor: ScheduledExecutorService
+    private lateinit var transport: FakeTransport
+    private lateinit var storage: Storage
+    private lateinit var queueFile: File
+    private var notifications = true
+
+    @Before
+    fun setUp() {
+        app = ApplicationProvider.getApplicationContext()
+        executor = Executors.newSingleThreadScheduledExecutor()
+        transport = FakeTransport()
+        storage = Storage(app)
+        queueFile = File(app.filesDir, "queue-test.jsonl").apply { delete() }
+    }
+
+    @After
+    fun tearDown() {
+        executor.shutdownNow()
+    }
+
+    private fun client(flushAt: Int = 3, trackLifecycle: Boolean = false, openLinks: Boolean = true) = Client(
+        app,
+        OneTraceConfig("cdp_wk_test", "https://crm.example.com", flushAt = flushAt, flushIntervalSeconds = 3600, trackLifecycle = trackLifecycle, openPushLinks = openLinks),
+        storage,
+        EventQueue(queueFile, 50),
+        transport,
+        executor,
+        DeviceContext(app, storage.installationId),
+        clock = { 1_800_000_000_000 },
+        notificationsEnabled = { notifications },
+    )
+
+    /** Waits until the SDK thread has processed everything submitted so far. */
+    private fun drain() = executor.submit {}.get()
+
+    @Test
+    fun sendsEventsInBatchesWithTheAppContext() {
+        val client = client()
+        client.track("order_completed", mapOf("amount" to 1250.5, "items" to listOf("SKU-1")))
+        client.screen("Cart", emptyMap())
+        drain()
+        assertTrue(transport.batches().isEmpty())
+
+        client.track("checkout_started", emptyMap())
+        drain()
+
+        val events = transport.events()
+        assertEquals(listOf("track", "screen", "track"), events.map { it.getString("type") })
+        assertEquals(1250.5, events[0].getJSONObject("properties").getDouble("amount"), 0.0)
+        assertEquals("Cart", events[1].getString("name"))
+        assertEquals("2027-01-15T08:00:00.000Z", events[0].getString("timestamp"))
+        assertEquals(storage.anonymousId, events[0].getString("anonymousId"))
+
+        val context = events[0].getJSONObject("context")
+        assertEquals(storage.installationId, context.getJSONObject("device").getString("id"))
+        assertEquals("android", context.getJSONObject("os").getString("name"))
+        assertEquals(app.packageName, context.getJSONObject("app").getString("namespace"))
+        assertEquals("onetrace-android", context.getJSONObject("library").getString("name"))
+        assertEquals(0, EventQueue(queueFile, 50).size())
+    }
+
+    @Test
+    fun keepsEventsOnDiskWhileTheNetworkFailsAndDropsBatchesThePlatformRejects() {
+        transport.status = 0
+        val client = client(flushAt = 1)
+        client.track("viewed", emptyMap())
+        drain()
+        assertEquals(1, EventQueue(queueFile, 50).size())
+
+        transport.status = 422
+        client.flush()
+        drain()
+        assertEquals(0, EventQueue(queueFile, 50).size())
+    }
+
+    @Test
+    fun registersTheInstallationWithThePushTokenOnlyWhenSomethingChanged() {
+        val client = client()
+        client.start()
+        client.setPushToken("fcm-token", "fcm")
+        client.setPushToken("fcm-token", "fcm")
+        drain()
+
+        val registrations = transport.registrations()
+        assertEquals(2, registrations.size)
+        assertFalse(registrations[0].getJSONObject("push").getBoolean("enabled"))
+
+        val push = registrations[1].getJSONObject("push")
+        assertEquals("fcm", push.getString("provider"))
+        assertEquals("fcm-token", push.getString("token"))
+        assertTrue(push.getBoolean("enabled"))
+        assertEquals(storage.installationId, registrations[1].getString("installationId"))
+        assertEquals(app.packageName, registrations[1].getJSONObject("app").getString("id"))
+        assertEquals("android", registrations[1].getJSONObject("sdk").getString("name"))
+
+        notifications = false
+        client.refreshRegistration()
+        drain()
+        assertFalse(transport.registrations().last().getJSONObject("push").getBoolean("enabled"))
+    }
+
+    @Test
+    fun movesTheInstallationToTheNextUserOnIdentifyAndReset() {
+        val client = client(flushAt = 1)
+        val anonymous = storage.anonymousId
+        client.identify("u-42", mapOf("email" to "anna@example.com"))
+        drain()
+
+        val identify = transport.events().single()
+        assertEquals("u-42", identify.getString("userId"))
+        assertEquals("anna@example.com", identify.getJSONObject("traits").getString("email"))
+        assertEquals("u-42", transport.registrations().last().getString("userId"))
+
+        client.reset()
+        client.track("viewed", emptyMap())
+        drain()
+
+        assertNull(storage.userId)
+        assertNotEquals(anonymous, storage.anonymousId)
+        assertTrue(transport.registrations().last().isNull("userId"))
+        assertEquals(storage.anonymousId, transport.registrations().last().getString("anonymousId"))
+        assertFalse(transport.events().last().has("userId"))
+    }
+
+    @Test
+    fun tracksInstallsAndUpdates() {
+        storage.appVersion = null
+        client(flushAt = 1, trackLifecycle = true).appLaunched()
+        drain()
+        storage.appVersion = "0.9"
+        client(flushAt = 1, trackLifecycle = true).appLaunched()
+        drain()
+
+        val events = transport.events().map { it.getString("event") }
+        assertEquals(listOf("app_installed", "app_updated"), events)
+        assertEquals("0.9", transport.events()[1].getJSONObject("properties").getString("previous_version"))
+    }
+
+    @Test
+    fun reportsATappedNotificationAndOpensItsLink() {
+        val intent = Intent(Intent.ACTION_MAIN).putExtra("cdp_token", "abc.def").putExtra("cdp_url", "shopapp://sale")
+
+        assertTrue(client().handlePushIntent(intent, app))
+        drain()
+
+        val event = transport.requests.single { it.path == "/push/events" }.body
+        assertEquals("opened", event.getString("event"))
+        assertEquals("shopapp://sale", event.getString("url"))
+        assertFalse(intent.hasExtra("cdp_token"))
+        assertEquals("shopapp://sale", shadowOf(app).nextStartedActivity.data.toString())
+        assertFalse(client().handlePushIntent(Intent(Intent.ACTION_MAIN), app))
+    }
+
+    @Test
+    fun keepsTheNewestEventsWhenTheQueueIsFull() {
+        val queue = EventQueue(queueFile, 3)
+        (1..5).forEach { queue.add(JSONObject().put("n", it)) }
+
+        assertEquals(listOf(3, 4, 5), EventQueue(queueFile, 3).peek(10).map { it.getInt("n") })
+    }
+}
