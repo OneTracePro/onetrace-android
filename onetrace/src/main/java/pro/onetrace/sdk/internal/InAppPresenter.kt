@@ -209,6 +209,7 @@ internal class InAppPresenter(
         window ?: return
         window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
         @Suppress("DEPRECATION")
         window.statusBarColor = Color.TRANSPARENT
         @Suppress("DEPRECATION")
