@@ -16,6 +16,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
@@ -24,6 +25,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -45,7 +47,10 @@ internal class InAppPresenter(
     private val images = Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "onetrace-images").apply { isDaemon = true } }
     private val waiting = ArrayDeque<JSONObject>()
     private var activity: Activity? = null
-    private var dialog: Dialog? = null
+    private var shown: Shown? = null
+
+    /** The message on screen: a dialog (`modal`, `fullscreen`) or a view over the activity content (`banner`). */
+    private class Shown(val dialog: Dialog?, val banner: View?, val host: Activity, val dismiss: () -> Unit)
 
     /** Any thread: the message is shown as soon as an activity is on screen and no other message is. */
     fun present(message: JSONObject) {
@@ -60,45 +65,99 @@ internal class InAppPresenter(
         showNext()
     }
 
+    /** A banner belongs to the content of its activity: it goes away with the activity, the next message may follow. */
     fun paused(activity: Activity) {
         if (this.activity === activity) {
             this.activity = null
         }
+
+        shown?.takeIf { it.banner != null && it.host === activity }?.let { banner ->
+            (banner.banner?.parent as? ViewGroup)?.removeView(banner.banner)
+            shown = null
+        }
     }
 
-    /** Tests: the message on screen. */
-    internal val current: Dialog? get() = dialog
+    /** Tests: the dialog on screen. */
+    internal val current: Dialog? get() = shown?.dialog
+
+    /** Tests: the banner on screen. */
+    internal val currentBanner: View? get() = shown?.banner
 
     private fun showNext() {
         val host = activity ?: return
 
-        if (dialog != null || host.isFinishing) {
+        if (shown != null || host.isFinishing) {
             return
         }
 
         val message = waiting.removeFirstOrNull() ?: return
         val token = message.optString("token")
         val layout = message.optString("layout", "modal")
-        val shown = Dialog(host)
-        shown.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        shown.setContentView(content(host, message, layout, shown, token))
-        shown.setCanceledOnTouchOutside(layout == "modal")
-        shown.setOnCancelListener { report(token, "dismissed", null) }
-        shown.setOnDismissListener {
-            dialog = null
-            showNext()
-        }
-        window(shown.window, layout, message.optString("position", "bottom"))
-        dialog = shown
-        shown.show()
-        report(token, "shown", null)
 
         if (layout == "banner") {
-            main.postDelayed({ if (dialog === shown) shown.dismiss() }, BANNER_SECONDS * 1000L)
+            showBanner(host, message, token)
+        } else {
+            showDialog(host, message, layout, token)
         }
+
+        report(token, "shown", null)
     }
 
-    private fun content(host: Activity, message: JSONObject, layout: String, shown: Dialog, token: String): ViewGroup {
+    private fun finished() {
+        shown = null
+        showNext()
+    }
+
+    /**
+     * A banner is a view over the activity content, not a window: the app keeps the focus and the touches outside it,
+     * and the system bars stay as the app draws them.
+     */
+    private fun showBanner(host: Activity, message: JSONObject, token: String) {
+        val decor = host.window?.decorView as? ViewGroup ?: return
+        val top = message.optString("position", "bottom") == "top"
+        var view: View? = null
+        val dismiss = {
+            view?.let { banner ->
+                view = null
+                decor.removeView(banner)
+                finished()
+            }
+            Unit
+        }
+        val banner = content(host, message, "banner", token, dismiss, if (top) WindowInsetsCompat.Type.statusBars() else WindowInsetsCompat.Type.navigationBars())
+        view = banner
+        decor.addView(banner, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, if (top) Gravity.TOP else Gravity.BOTTOM))
+        ViewCompat.requestApplyInsets(banner)
+        shown = Shown(null, banner, host, dismiss)
+        main.postDelayed({ if (shown?.banner === banner) dismiss() }, BANNER_SECONDS * 1000L)
+    }
+
+    private fun showDialog(host: Activity, message: JSONObject, layout: String, token: String) {
+        val dialog = Dialog(host)
+        val dismiss = { dialog.dismiss() }
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        dialog.setContentView(content(host, message, layout, token, dismiss, WindowInsetsCompat.Type.systemBars()))
+        dialog.setCanceledOnTouchOutside(layout == "modal")
+        dialog.setOnCancelListener { report(token, "dismissed", null) }
+        dialog.setOnDismissListener { finished() }
+        window(dialog.window, layout == "fullscreen")
+
+        // A full screen message under the bars: dark bar icons on a light background.
+        if (layout == "fullscreen") {
+            dialog.window?.let { window ->
+                val light = ColorUtils.calculateLuminance(color(message.optString("background_color"), Color.WHITE)) > 0.5
+                WindowCompat.getInsetsController(window, window.decorView).apply {
+                    isAppearanceLightStatusBars = light
+                    isAppearanceLightNavigationBars = light
+                }
+            }
+        }
+
+        shown = Shown(dialog, null, host, dismiss)
+        dialog.show()
+    }
+
+    private fun content(host: Activity, message: JSONObject, layout: String, token: String, dismiss: () -> Unit, insetTypes: Int): ViewGroup {
         val text = color(message.optString("text_color"), Color.parseColor("#111827"))
         val card = LinearLayout(host).apply {
             orientation = LinearLayout.VERTICAL
@@ -153,7 +212,7 @@ internal class InAppPresenter(
             contentDescription = "close"
             setOnClickListener {
                 report(token, "dismissed", null)
-                shown.dismiss()
+                dismiss()
             }
         })
 
@@ -169,7 +228,7 @@ internal class InAppPresenter(
                 }
                 setOnClickListener {
                     report(token, "clicked", url)
-                    shown.dismiss()
+                    dismiss()
 
                     if (openLinks && url != null) {
                         try {
@@ -187,14 +246,13 @@ internal class InAppPresenter(
         return FrameLayout(host).apply {
             val margin = if (layout == "fullscreen") 0 else dp(host, 16)
 
-            // The window is drawn under the status and navigation bars: the message keeps clear of them, and a full
-            // screen message paints its color behind them.
+            // Drawn under the system bars: the message keeps clear of them, a full screen one paints its color behind.
             if (layout == "fullscreen") {
                 setBackgroundColor(color(message.optString("background_color"), Color.WHITE))
             }
 
             ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
-                val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+                val bars = insets.getInsets(insetTypes or WindowInsetsCompat.Type.displayCutout())
                 view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
                 insets
             }
@@ -205,7 +263,7 @@ internal class InAppPresenter(
         }
     }
 
-    private fun window(window: Window?, layout: String, position: String) {
+    private fun window(window: Window?, fullscreen: Boolean) {
         window ?: return
         window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -228,16 +286,7 @@ internal class InAppPresenter(
             }
         }
 
-        when (layout) {
-            "fullscreen" -> window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            "banner" -> {
-                window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                window.setGravity(if (position == "top") Gravity.TOP else Gravity.BOTTOM)
-                window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-                window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
-            }
-            else -> window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
+        window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, if (fullscreen) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT)
     }
 
     private fun color(value: String, fallback: Int): Int = try {

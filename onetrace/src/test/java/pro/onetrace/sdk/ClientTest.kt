@@ -281,6 +281,34 @@ class ClientTest {
         assertEquals("shopapp://sale", shadowOf(activity).nextStartedActivity.data.toString())
     }
 
+    @Test
+    fun showsABannerOverTheActivityContentAndTheNextMessageAfterIt() {
+        val reports = mutableListOf<String>()
+        val presenter = pro.onetrace.sdk.internal.InAppPresenter(openLinks = false) { token, event, _ -> reports.add("$token $event") }
+        val activity = org.robolectric.Robolectric.buildActivity(android.app.Activity::class.java).setup().get()
+        presenter.resumed(activity)
+        presenter.present(JSONObject().put("token", "b1").put("layout", "banner").put("position", "top").put("title", "Free delivery").put("close_text", "Close"))
+        presenter.present(JSONObject().put("token", "m1").put("layout", "modal").put("title", "Sale"))
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+
+        val banner = presenter.currentBanner!!
+        assertTrue(banner.parent === activity.window.decorView)
+        assertEquals(null, presenter.current)
+
+        findText(banner, "Close")!!.performClick()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+
+        assertEquals(null, banner.parent)
+        assertTrue(presenter.current!!.isShowing)
+        assertEquals(listOf("b1 shown", "b1 dismissed", "m1 shown"), reports)
+    }
+
+    private fun findText(view: android.view.View, text: String): android.view.View? = when (view) {
+        is android.widget.TextView -> view.takeIf { it.text.toString() == text }
+        is android.view.ViewGroup -> (0 until view.childCount).firstNotNullOfOrNull { findText(view.getChildAt(it), text) }
+        else -> null
+    }
+
     private fun findButton(view: android.view.View, text: String): android.widget.Button? = when (view) {
         is android.widget.Button -> view.takeIf { it.text.toString() == text }
         is android.view.ViewGroup -> (0 until view.childCount).firstNotNullOfOrNull { findButton(view.getChildAt(it), text) }
