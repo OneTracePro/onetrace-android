@@ -207,6 +207,22 @@ class ClientTest {
     }
 
     @Test
+    fun reportsATapOnceWhenTheIntentAndTheWrapperBothPassItOn() {
+        val client = client(openLinks = false)
+        val intent = Intent(Intent.ACTION_MAIN).putExtra("cdp_token", "abc.def")
+
+        assertTrue(client.handlePushIntent(intent, app))
+        assertTrue(client.notificationOpened(mapOf("cdp_token" to "abc.def"), app))
+        assertTrue(client.notificationOpened(mapOf("cdp_token" to "ghi.jkl", "cdp_url" to ""), app))
+        assertFalse(client.notificationOpened(mapOf("google.message_id" to "1"), app))
+        drain()
+
+        val opened = transport.requests.filter { it.path == "/push/events" }.map { it.body }
+        assertEquals(listOf("abc.def", "ghi.jkl"), opened.map { it.getString("token") })
+        assertFalse(opened[1].has("url"))
+    }
+
+    @Test
     fun keepsTheNewestEventsWhenTheQueueIsFull() {
         val queue = EventQueue(queueFile, 3)
         (1..5).forEach { queue.add(JSONObject().put("n", it)) }

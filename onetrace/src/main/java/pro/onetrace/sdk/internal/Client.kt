@@ -35,6 +35,7 @@ internal class Client(
     /** In-app messages received but not shown yet (SDK thread only). */
     private val inApp = mutableListOf<JSONObject>()
     private val seen = LinkedHashSet<String>()
+    private val openedTokens = LinkedHashSet<String>()
 
     @Volatile
     var inAppPaused = false
@@ -138,8 +139,34 @@ internal class Client(
      */
     fun handlePushIntent(intent: Intent?, launcher: Context): Boolean {
         val token = intent?.getStringExtra(PUSH_TOKEN) ?: return false
-        val url = intent.getStringExtra(PUSH_URL)?.takeIf { it.isNotBlank() }
+        val url = intent.getStringExtra(PUSH_URL)
         intent.removeExtra(PUSH_TOKEN)
+        opened(token, url, launcher)
+
+        return true
+    }
+
+    /** A tap on a OneTrace notification shown by the app's own code; false when the data is not from OneTrace. */
+    fun notificationOpened(data: Map<String, String>, launcher: Context): Boolean {
+        val token = data[PUSH_TOKEN] ?: return false
+        opened(token, data[PUSH_URL], launcher)
+
+        return true
+    }
+
+    /** Reports the tap once: the launch intent and a wrapper (firebase_messaging and the like) may both pass it on. */
+    private fun opened(token: String, link: String?, launcher: Context) {
+        synchronized(openedTokens) {
+            if (!openedTokens.add(token)) {
+                return
+            }
+
+            if (openedTokens.size > 50) {
+                openedTokens.remove(openedTokens.first())
+            }
+        }
+
+        val url = link?.takeIf { it.isNotBlank() }
         run { pushEventNow(token, "opened", url) }
 
         if (config.openPushLinks && url != null) {
@@ -155,8 +182,6 @@ internal class Client(
                 log("No app can open $url")
             }
         }
-
-        return true
     }
 
     /** The app received a OneTrace notification (FCM onMessageReceived): the message is delivered. */

@@ -1,9 +1,14 @@
 package pro.onetrace.sdk
 
+import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import pro.onetrace.sdk.internal.AppLifecycle
 import pro.onetrace.sdk.internal.Client
 import pro.onetrace.sdk.internal.DeviceContext
@@ -22,6 +27,9 @@ import java.util.concurrent.Executors
 public object OneTrace {
     @Volatile
     private var client: Client? = null
+
+    @Volatile
+    private var inApp: InAppPresenter? = null
 
     @Volatile
     private var wrapper: Pair<String, String>? = null
@@ -46,6 +54,7 @@ public object OneTrace {
         val inApp = InAppPresenter(config.openPushLinks) { token, event, url -> created.reportInApp(token, event, url) }
         created.presenter = inApp::present
         client = created
+        this.inApp = inApp
 
         created.appLaunched()
         created.start()
@@ -135,6 +144,15 @@ public object OneTrace {
     @JvmStatic
     public fun handleIntent(context: Context, intent: Intent?): Boolean = client?.handlePushIntent(intent, context) ?: false
 
+    /**
+     * A tap on a OneTrace notification that your own code showed or received, for example `onMessageOpenedApp` of
+     * firebase_messaging: reports the open once and opens its link.
+     *
+     * @return true when the data came from a OneTrace notification.
+     */
+    @JvmStatic
+    public fun notificationOpened(context: Context, data: Map<String, String>): Boolean = client?.notificationOpened(data, context) ?: false
+
     /** A OneTrace notification reached the app (`onMessageReceived`): the message becomes delivered. */
     @JvmStatic
     public fun notificationReceived(data: Map<String, String>) {
@@ -162,9 +180,25 @@ public object OneTrace {
         client?.device?.wrapper = wrapper
     }
 
+    /**
+     * For the Flutter and React Native wrappers, which start the SDK after their activity was created: checks the
+     * activity intent for a notification tap and shows in-app messages over the activity.
+     */
+    @JvmStatic
+    public fun attachActivity(activity: Activity) {
+        val current = client ?: return
+        current.handlePushIntent(activity.intent, activity)
+        val resumed = (activity as? LifecycleOwner)?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) ?: true
+
+        if (resumed) {
+            Handler(Looper.getMainLooper()).post { inApp?.resumed(activity) }
+        }
+    }
+
     /** Tests only: forget the instance. */
     @JvmStatic
     internal fun shutdownForTests() {
         client = null
+        inApp = null
     }
 }
