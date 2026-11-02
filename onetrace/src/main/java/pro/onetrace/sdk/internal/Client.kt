@@ -54,24 +54,32 @@ internal class Client(
         enqueue("screen", JSONObject().put("name", name).put("properties", Json.obj(properties)))
     }
 
-    fun identify(userId: String?, traits: Map<String, Any?>) = run {
+    fun identify(userId: String?, traits: Map<String, Any?>, userHash: String?) = run {
         val changed = userId != null && userId != storage.userId
+        // A signature belongs to its user id: a new user drops the previous one, the same user keeps it until a new one.
+        val signed = userId != null && userHash != null && userHash != storage.userHash
 
         if (userId != null) {
             storage.userId = userId
         }
 
+        if (changed || signed) {
+            storage.userHash = userHash
+        }
+
         enqueue("identify", JSONObject().put("traits", Json.obj(traits)))
 
-        // Another user on this installation: the platform moves it to them without merging the profiles.
-        if (changed) {
+        // Another user on this installation: the platform moves it to them without merging the profiles. A new
+        // signature re-registers too: with a required signature an unsigned user id was not accepted.
+        if (changed || signed) {
             registerNow(force = false)
         }
     }
 
-    fun alias(userId: String) = run {
+    fun alias(userId: String, userHash: String?) = run {
         val previous = storage.userId ?: storage.anonymousId
         storage.userId = userId
+        storage.userHash = userHash
         enqueue("alias", JSONObject().put("previousId", previous))
         registerNow(force = false)
     }
@@ -79,6 +87,7 @@ internal class Client(
     fun reset() = run {
         flushNow()
         storage.userId = null
+        storage.userHash = null
         storage.newAnonymousId()
         registerNow(force = false)
     }
@@ -225,7 +234,10 @@ internal class Client(
             .put("anonymousId", storage.anonymousId)
             .put("timestamp", Json.iso(clock()))
             .put("context", device.build())
-        storage.userId?.let { fields.put("userId", it) }
+        storage.userId?.let { userId ->
+            fields.put("userId", userId)
+            storage.userHash?.let { fields.put("userHash", it) }
+        }
         queue.add(fields)
         log("Queued $type ${fields.optString("event", fields.optString("name"))}")
 
@@ -334,6 +346,7 @@ internal class Client(
             .put("installationId", storage.installationId)
             .put("anonymousId", storage.anonymousId)
             .put("userId", storage.userId ?: JSONObject.NULL)
+            .put("userHash", storage.userId?.let { storage.userHash })
             .put("app", JSONObject().put("id", device.packageName).put("version", device.appVersion).put("build", device.appBuild))
             .put("os", JSONObject().put("name", "android").put("version", android.os.Build.VERSION.RELEASE ?: ""))
             .put("device", JSONObject().put("manufacturer", android.os.Build.MANUFACTURER).put("model", android.os.Build.MODEL))

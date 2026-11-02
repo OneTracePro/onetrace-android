@@ -158,7 +158,7 @@ class ClientTest {
     fun movesTheInstallationToTheNextUserOnIdentifyAndReset() {
         val client = client(flushAt = 1)
         val anonymous = storage.anonymousId
-        client.identify("u-42", mapOf("email" to "anna@example.com"))
+        client.identify("u-42", mapOf("email" to "anna@example.com"), null)
         drain()
 
         val identify = transport.events().single()
@@ -175,6 +175,41 @@ class ClientTest {
         assertTrue(transport.registrations().last().isNull("userId"))
         assertEquals(storage.anonymousId, transport.registrations().last().getString("anonymousId"))
         assertFalse(transport.events().last().has("userId"))
+    }
+
+    @Test
+    fun sendsTheUserIdSignatureWithTheUserIdUntilReset() {
+        val client = client(flushAt = 1)
+        client.identify("u-42", emptyMap(), "a1b2")
+        client.identify("u-42", mapOf("plan" to "pro"), null)
+        client.track("viewed", emptyMap())
+        drain()
+
+        assertEquals(listOf("a1b2", "a1b2", "a1b2"), transport.events().map { it.getString("userHash") })
+        assertEquals("a1b2", transport.registrations().last().getString("userHash"))
+
+        // A new signature of the same user re-registers the installation with it.
+        client.identify("u-42", emptyMap(), "c3d4")
+        drain()
+        assertEquals("c3d4", transport.registrations().last().getString("userHash"))
+
+        // Another user without a signature does not inherit the previous one.
+        client.identify("u-7", emptyMap(), null)
+        drain()
+        assertFalse(transport.events().last().has("userHash"))
+        assertFalse(transport.registrations().last().has("userHash"))
+
+        client.alias("u-8", "e5f6")
+        drain()
+        assertEquals("e5f6", transport.events().last().getString("userHash"))
+        assertEquals("e5f6", transport.registrations().last().getString("userHash"))
+
+        client.reset()
+        client.track("viewed", emptyMap())
+        drain()
+        assertNull(storage.userHash)
+        assertFalse(transport.events().last().has("userHash"))
+        assertFalse(transport.registrations().last().has("userHash"))
     }
 
     @Test

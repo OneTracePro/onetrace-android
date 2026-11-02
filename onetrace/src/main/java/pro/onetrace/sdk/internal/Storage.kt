@@ -21,6 +21,11 @@ internal class Storage(context: Context) {
         get() = prefs.getString(USER_ID, null)
         set(value) = prefs.edit().putString(USER_ID, value).apply()
 
+    /** Signature of [userId] from the app's server (ADR-158): sent with the user id. */
+    var userHash: String?
+        get() = prefs.getString(USER_HASH, null)
+        set(value) = prefs.edit().putString(USER_HASH, value).apply()
+
     var appVersion: String?
         get() = prefs.getString(APP_VERSION, null)
         set(value) = prefs.edit().putString(APP_VERSION, value).apply()
@@ -48,6 +53,7 @@ internal class Storage(context: Context) {
         const val INSTALLATION_ID = "installation_id"
         const val ANONYMOUS_ID = "anonymous_id"
         const val USER_ID = "user_id"
+        const val USER_HASH = "user_hash"
         const val APP_VERSION = "app_version"
         const val APP_BUILD = "app_build"
         const val PUSH_TOKEN = "push_token"
