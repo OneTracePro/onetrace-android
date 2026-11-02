@@ -28,9 +28,9 @@ and the SDK to the app module:
 
 ```kotlin
 dependencies {
-    implementation("com.github.OneTracePro.onetrace-android:onetrace:1.0.0")
+    implementation("com.github.OneTracePro.onetrace-android:onetrace:1.1.0")
     // Mobile push through Firebase Cloud Messaging:
-    implementation("com.github.OneTracePro.onetrace-android:onetrace-fcm:1.0.0")
+    implementation("com.github.OneTracePro.onetrace-android:onetrace-fcm:1.1.0")
 }
 ```
 
