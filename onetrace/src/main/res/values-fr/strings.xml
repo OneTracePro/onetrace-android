@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="onetrace_feed_title">Actualités</string>
+    <string name="onetrace_feed_close">Fermer les actualités</string>
+    <string name="onetrace_feed_empty">Les offres et actualités de la boutique apparaîtront ici.</string>
+    <string name="onetrace_feed_dismiss">Retirer</string>
+    <string name="onetrace_feed_pinned">Épinglé</string>
+</resources>

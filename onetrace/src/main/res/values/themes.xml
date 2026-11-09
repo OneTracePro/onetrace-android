@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The feed screen draws its own header and colors; light or dark after the night mode. -->
+    <style name="OneTraceFeedTheme" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

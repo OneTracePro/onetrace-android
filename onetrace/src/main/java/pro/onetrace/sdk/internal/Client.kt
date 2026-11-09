@@ -1,6 +1,5 @@
 package pro.onetrace.sdk.internal
 
-import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -39,6 +38,9 @@ internal class Client(
 
     @Volatile
     var inAppPaused = false
+
+    /** The message feed of the current anonymous id. */
+    val feed = Feed(transport, executor, { storage.anonymousId }, config.openPushLinks, ::log, clock)
 
     fun start() {
         executor.scheduleWithFixedDelay({ flushNow() }, config.flushIntervalSeconds, config.flushIntervalSeconds, TimeUnit.SECONDS)
@@ -90,6 +92,7 @@ internal class Client(
         storage.userHash = null
         storage.newAnonymousId()
         registerNow(force = false)
+        feed.reset()
     }
 
     fun flush() = run { flushNow() }
@@ -132,6 +135,7 @@ internal class Client(
 
         fetchInAppNow()
         presentInApp(null)
+        feed.refreshIfWatched(force = false)
     }
 
     fun appBackground() = run {
@@ -178,18 +182,8 @@ internal class Client(
         val url = link?.takeIf { it.isNotBlank() }
         run { pushEventNow(token, "opened", url) }
 
-        if (config.openPushLinks && url != null) {
-            val view = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-
-            if (launcher !is android.app.Activity) {
-                view.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-
-            try {
-                launcher.startActivity(view)
-            } catch (e: ActivityNotFoundException) {
-                log("No app can open $url")
-            }
+        if (config.openPushLinks && url != null && !Links.open(launcher, url)) {
+            log("No app can open $url")
         }
     }
 
@@ -255,10 +249,11 @@ internal class Client(
                 result.successful -> {
                     queue.remove(batch.size)
                     log("Sent ${batch.size} events")
-                    // The events may have started a journey with an in-app message: pick it up.
+                    // The events may have started a journey with an in-app message or a feed card: pick it up.
                     if (queue.size() == 0) {
                         fetchInAppNow()
                         presentInApp(null)
+                        feed.refreshIfWatched(force = false)
                     }
                 }
                 // A wrong key: the events wait until a new app version fixes it.

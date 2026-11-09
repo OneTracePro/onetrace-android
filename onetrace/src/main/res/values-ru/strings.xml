@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="onetrace_feed_title">Новости</string>
+    <string name="onetrace_feed_close">Закрыть новости</string>
+    <string name="onetrace_feed_empty">Здесь появятся предложения и новости магазина.</string>
+    <string name="onetrace_feed_dismiss">Убрать</string>
+    <string name="onetrace_feed_pinned">Закреплено</string>
+</resources>

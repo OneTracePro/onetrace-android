@@ -136,6 +136,79 @@ public object OneTrace {
         client?.fetchInApp()
     }
 
+    /**
+     * Loads the message feed: cards that stay in the app until they expire or the user removes them, pinned first, then
+     * the newest, up to 50. [callback] is called on the main thread; before [init] with an empty list and `false`.
+     */
+    @JvmStatic
+    public fun fetchFeed(callback: FeedCallback) {
+        client?.feed?.fetch(callback) ?: Handler(Looper.getMainLooper()).post { callback.onFeed(emptyList(), false) }
+    }
+
+    /** The feed as last loaded, with the shows, clicks and removals since then; no request. */
+    @JvmStatic
+    public val feedCards: List<FeedCard> get() = client?.feed?.current ?: emptyList()
+
+    /** Cards of the last loaded feed the user has not seen yet. */
+    @JvmStatic
+    public val feedUnreadCount: Int get() = client?.feed?.unread ?: 0
+
+    /**
+     * Calls [listener] on the main thread with the unread count now and every time it changes. While a listener is
+     * added, the SDK loads the feed when the app opens and after it sends events (at most once a minute).
+     */
+    @JvmStatic
+    public fun addFeedUnreadListener(listener: FeedUnreadListener) {
+        client?.feed?.addUnreadListener(listener)
+    }
+
+    @JvmStatic
+    public fun removeFeedUnreadListener(listener: FeedUnreadListener) {
+        client?.feed?.removeUnreadListener(listener)
+    }
+
+    /**
+     * For your own feed UI: the card became visible (at least half of it) in the open feed. Reported once per card; the
+     * card becomes read and the message delivered and opened.
+     */
+    @JvmStatic
+    public fun feedCardShown(card: FeedCard) {
+        client?.feed?.shown(card.token)
+    }
+
+    /**
+     * For your own feed UI: a tap on the button, or on the card when [FeedCard.opensOnTap]. Reports the click with the
+     * link and opens it — through [setFeedLinkHandler], or as push links are opened (`openPushLinks`).
+     *
+     * @return false when the card has no link that may be opened (`javascript:`, `data:` and `file:` links are not).
+     */
+    @JvmStatic
+    public fun feedCardClicked(context: Context, card: FeedCard): Boolean = client?.feed?.clicked(context, card) ?: false
+
+    /** For your own feed UI: the user removed the card; it does not come back. */
+    @JvmStatic
+    public fun feedCardDismissed(card: FeedCard) {
+        client?.feed?.dismissed(card.token)
+    }
+
+    /** Opens the links of feed cards in your own way; null returns to the default. */
+    @JvmStatic
+    public fun setFeedLinkHandler(handler: FeedLinkHandler?) {
+        client?.feed?.linkHandler = handler
+    }
+
+    /** Opens the ready-made feed screen, [OneTraceFeedActivity]; [OneTraceFeedView] puts the feed into your own one. */
+    @JvmStatic
+    public fun openFeed(context: Context) {
+        val intent = Intent(context, OneTraceFeedActivity::class.java)
+
+        if (context !is Activity) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        context.startActivity(intent)
+    }
+
     /** Call after the user answered the notification permission prompt: the platform learns whether push can be sent. */
     @JvmStatic
     public fun notificationPermissionChanged() {
@@ -203,6 +276,15 @@ public object OneTrace {
         if (resumed) {
             Handler(Looper.getMainLooper()).post { inApp?.resumed(activity) }
         }
+    }
+
+    /** The feed of the initialized SDK, for [OneTraceFeedView]. */
+    internal val feed: pro.onetrace.sdk.internal.Feed? get() = client?.feed
+
+    /** Tests only: the instance to use. */
+    @JvmStatic
+    internal fun setClientForTests(client: Client?) {
+        this.client = client
     }
 
     /** Tests only: forget the instance. */

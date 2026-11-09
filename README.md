@@ -9,6 +9,7 @@ The Android SDK of [OneTrace.pro](https://onetrace.pro), the customer data platf
 - Kotlin, Android 5.0+ (API 21). No third-party dependencies in the core besides AndroidX Core and Lifecycle.
 - Events are queued on disk and sent in batches: nothing is lost offline or on a restart.
 - Mobile push through Firebase Cloud Messaging with the optional `onetrace-fcm` module: tokens, delivery receipts, opens and links of tapped notifications.
+- In-app messages and a message feed with a ready-made screen.
 
 ## Installation
 
@@ -28,9 +29,9 @@ and the SDK to the app module:
 
 ```kotlin
 dependencies {
-    implementation("com.github.OneTracePro.onetrace-android:onetrace:1.1.0")
+    implementation("com.github.OneTracePro.onetrace-android:onetrace:1.2.0")
     // Mobile push through Firebase Cloud Messaging:
-    implementation("com.github.OneTracePro.onetrace-android:onetrace-fcm:1.1.0")
+    implementation("com.github.OneTracePro.onetrace-android:onetrace-fcm:1.2.0")
 }
 ```
 
@@ -107,6 +108,70 @@ override fun onMessageReceived(message: RemoteMessage) {
 ```
 
 For a `singleTop` or `singleTask` activity call `OneTrace.handleIntent(this, intent)` from `onNewIntent()`. Notifications use the `onetrace` channel; set your own with the `pro.onetrace.notification_channel` meta-data, and the icon with `com.google.firebase.messaging.default_notification_icon`.
+
+## Message feed
+
+The feed keeps personal cards — offers, news, reminders, promo codes — in the app until they expire or the user removes them; unlike in-app messages, which are shown once. Cards come from journeys and campaigns through the **Message feed** channel; the same cards are shown in the feed widget of your website. Requires the feed in the plan; without it the feed is empty.
+
+### Ready-made screen
+
+```kotlin
+OneTrace.openFeed(context)
+```
+
+opens `OneTraceFeedActivity`: the "Updates" header and the cards in their layouts (image on the left, image on top, image only), pinned cards first with the "Pinned" label, a remove button on every card, an empty state and pull-to-refresh. A card is reported shown once at least half of it is visible; a tap on the button, or on a card without a button, reports the click and opens its link (a web page or a deep link of your app, as for push). The texts follow the device language (English, Russian, German, Uzbek, Turkish, Spanish, French, Italian, Portuguese, Chinese), the colors follow the night mode, buttons take the `colorAccent` of your app theme.
+
+To put the feed into a screen of your own, add `OneTraceFeedView` — from code or a layout:
+
+```xml
+<pro.onetrace.sdk.OneTraceFeedView
+    android:id="@+id/feed"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent" />
+```
+
+```kotlin
+binding.feed.accentColor = ContextCompat.getColor(this, R.color.brand)  // optional
+binding.feed.refresh()                                                  // it loads itself when attached
+```
+
+### Unread badge
+
+```kotlin
+private val unread = FeedUnreadListener { count -> badge.isVisible = count > 0; badge.text = "$count" }
+
+override fun onStart() {
+    super.onStart()
+    OneTrace.addFeedUnreadListener(unread)  // called now and on every change, on the main thread
+}
+
+override fun onStop() {
+    OneTrace.removeFeedUnreadListener(unread)
+    super.onStop()
+}
+```
+
+While a listener is added, the SDK loads the feed when the app opens and after it sends events, at most once a minute. `OneTrace.feedUnreadCount` reads the current count.
+
+### Your own feed UI
+
+```kotlin
+OneTrace.fetchFeed { cards, success ->
+    adapter.submitList(cards)  // FeedCard: token, layout, title, body, imageUrl, buttonText, buttonUrl, pinned, read, createdAt, expiresAt
+}
+
+OneTrace.feedCardShown(card)              // at least half of the card is visible: reported once, the card becomes read
+OneTrace.feedCardClicked(context, card)   // the button, or the card when card.opensOnTap: reports the click, opens the link
+OneTrace.feedCardDismissed(card)          // removed: it does not come back
+```
+
+Shows reported in this session stay read after a refresh even before the platform has them. To open card links yourself (for example with in-app navigation):
+
+```kotlin
+OneTrace.setFeedLinkHandler { _, url -> router.open(url); true }  // true: handled; false: the SDK opens it
+```
+
+With `openPushLinks = false` the SDK opens no card links itself; set a link handler.
 
 ## How it works
 

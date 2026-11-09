@@ -2,15 +2,10 @@ package pro.onetrace.sdk.internal
 
 import android.app.Activity
 import android.app.Dialog
-import android.content.ActivityNotFoundException
-import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
-import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -30,9 +25,6 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
-import java.util.concurrent.Executors
 
 /**
  * Shows in-app messages on the main thread over the resumed activity, one at a time: a centered card (`modal`), a
@@ -44,7 +36,6 @@ internal class InAppPresenter(
     private val report: (token: String, event: String, url: String?) -> Unit,
 ) {
     private val main = Handler(Looper.getMainLooper())
-    private val images = Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "onetrace-images").apply { isDaemon = true } }
     private val waiting = ArrayDeque<JSONObject>()
     private var activity: Activity? = null
     private var shown: Shown? = null
@@ -169,14 +160,14 @@ internal class InAppPresenter(
             gravity = if (layout == "fullscreen") Gravity.CENTER else Gravity.NO_GRAVITY
         }
 
-        message.optString("image_url").takeIf { it.startsWith("https://") || it.startsWith("http://") }?.let { link ->
+        Links.image(message.optString("image_url"))?.let { link ->
             val image = ImageView(host).apply {
                 adjustViewBounds = true
                 scaleType = ImageView.ScaleType.CENTER_CROP
                 maxHeight = dp(host, if (layout == "banner") 64 else 220)
             }
             card.addView(image, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(host, 12) })
-            images.execute { download(link)?.let { bitmap -> main.post { image.setImageBitmap(bitmap) } } }
+            ImageLoader.load(image, link, host.resources.displayMetrics.widthPixels)
         }
 
         message.optString("title").takeIf { it.isNotBlank() }?.let {
@@ -238,12 +229,9 @@ internal class InAppPresenter(
                     report(token, "clicked", url)
                     dismiss()
 
+                    // No app can open the link: the click is still counted.
                     if (openLinks && url != null) {
-                        try {
-                            host.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                        } catch (e: ActivityNotFoundException) {
-                            // No app can open the link: the click is still counted.
-                        }
+                        Links.open(host, url)
                     }
                 }
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(host, 8) })
@@ -304,16 +292,6 @@ internal class InAppPresenter(
     }
 
     private fun dp(activity: Activity, value: Int): Int = (value * activity.resources.displayMetrics.density).toInt()
-
-    private fun download(url: String): Bitmap? = try {
-        (URL(url).openConnection() as HttpURLConnection).run {
-            connectTimeout = 10_000
-            readTimeout = 10_000
-            inputStream.use(BitmapFactory::decodeStream).also { disconnect() }
-        }
-    } catch (e: Exception) {
-        null
-    }
 
     private companion object {
         const val BANNER_SECONDS = 8

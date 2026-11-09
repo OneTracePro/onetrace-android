@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="onetrace_feed_title">Updates</string>
+    <string name="onetrace_feed_close">Close updates</string>
+    <string name="onetrace_feed_empty">Offers and news from the shop will appear here.</string>
+    <string name="onetrace_feed_dismiss">Remove</string>
+    <string name="onetrace_feed_pinned">Pinned</string>
+</resources>

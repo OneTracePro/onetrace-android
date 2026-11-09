@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="onetrace_feed_title">Novità</string>
+    <string name="onetrace_feed_close">Chiudi le novità</string>
+    <string name="onetrace_feed_empty">Qui compariranno le offerte e le novità del negozio.</string>
+    <string name="onetrace_feed_dismiss">Rimuovi</string>
+    <string name="onetrace_feed_pinned">Fissato</string>
+</resources>

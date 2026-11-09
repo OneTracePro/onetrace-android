@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="onetrace_feed_title">Yangiliklar</string>
+    <string name="onetrace_feed_close">Yangiliklarni yopish</string>
+    <string name="onetrace_feed_empty">Bu yerda doʻkonning takliflari va yangiliklari paydo boʻladi.</string>
+    <string name="onetrace_feed_dismiss">Olib tashlash</string>
+    <string name="onetrace_feed_pinned">Mahkamlangan</string>
+</resources>

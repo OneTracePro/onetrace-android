@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="onetrace_feed_title">最新消息</string>
+    <string name="onetrace_feed_close">关闭最新消息</string>
+    <string name="onetrace_feed_empty">商店的优惠和新闻将显示在这里。</string>
+    <string name="onetrace_feed_dismiss">移除</string>
+    <string name="onetrace_feed_pinned">已置顶</string>
+</resources>
