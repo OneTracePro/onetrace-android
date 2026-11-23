@@ -12,6 +12,11 @@ package pro.onetrace.sdk
  * @property trackActivityScreens send a `screen` call with the activity name every time an activity starts.
  * @property openPushLinks open the link of a tapped push notification (`cdp_url`) automatically.
  * @property debug log what the SDK does to Logcat under the `OneTrace` tag.
+ * @property remoteConfigMinFetchIntervalSeconds fetch the app settings ([OneTrace.remoteConfig]) at most this often;
+ * `identify` and `reset` fetch them right away.
+ * @property richPush the app passes OneTrace push data to [OneTrace.handlePushData] (the `onetrace-fcm` module does it
+ * itself): the platform then sends carousels, buttons, timers, Live Updates and silent checks to this installation.
+ * The Flutter and React Native wrappers set it when the app turns the push handling on.
  */
 public class OneTraceConfig @JvmOverloads constructor(
     public val writeKey: String,
@@ -23,6 +28,8 @@ public class OneTraceConfig @JvmOverloads constructor(
     public val trackActivityScreens: Boolean = false,
     public val openPushLinks: Boolean = true,
     public val debug: Boolean = false,
+    public val remoteConfigMinFetchIntervalSeconds: Long = 3600,
+    public val richPush: Boolean = false,
 ) {
     internal val apiUrl: String
         get() = host.trim().trimEnd('/').removeSuffix("/api/v1") + "/api/v1"

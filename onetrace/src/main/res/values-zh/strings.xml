@@ -5,4 +5,10 @@
     <string name="onetrace_feed_empty">商店的优惠和新闻将显示在这里。</string>
     <string name="onetrace_feed_dismiss">移除</string>
     <string name="onetrace_feed_pinned">已置顶</string>
+    <string name="onetrace_channel_name">通知</string>
+    <string name="onetrace_live_channel_name">订单和配送状态</string>
+    <string name="onetrace_live_completed">已完成</string>
+    <string name="onetrace_live_step">第 %1$d 步，共 %2$d 步</string>
+    <string name="onetrace_carousel_previous">上一个</string>
+    <string name="onetrace_carousel_next">下一个</string>
 </resources>

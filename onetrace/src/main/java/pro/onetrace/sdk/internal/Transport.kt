@@ -5,17 +5,23 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
-internal class HttpResult(val status: Int, val body: String) {
+internal class HttpResult(val status: Int, val body: String, val headers: Map<String, String> = emptyMap()) {
     val successful: Boolean get() = status in 200..299
 
     /** The request may succeed later: no network, rate limit or a server error. */
     val retryable: Boolean get() = status == 0 || status == 429 || status >= 500
+
+    /** A response header by its name in any case. */
+    fun header(name: String): String? = headers[name.lowercase()]
 }
 
 internal interface Transport {
     fun post(path: String, body: JSONObject): HttpResult
 
     fun get(path: String): HttpResult
+
+    /** A GET with request headers, for example `If-None-Match` of a list fetched before. */
+    fun get(path: String, headers: Map<String, String>): HttpResult = get(path)
 }
 
 /**
@@ -26,7 +32,9 @@ internal class HttpTransport(private val apiUrl: String, private val writeKey: S
 
     override fun get(path: String): HttpResult = request("GET", path, null)
 
-    private fun request(method: String, path: String, body: JSONObject?): HttpResult {
+    override fun get(path: String, headers: Map<String, String>): HttpResult = request("GET", path, null, headers)
+
+    private fun request(method: String, path: String, body: JSONObject?, headers: Map<String, String> = emptyMap()): HttpResult {
         val connection = try {
             URL(apiUrl + path).openConnection() as HttpURLConnection
         } catch (e: IOException) {
@@ -40,6 +48,7 @@ internal class HttpTransport(private val apiUrl: String, private val writeKey: S
             connection.setRequestProperty("Authorization", "Bearer $writeKey")
             connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty("User-Agent", userAgent)
+            headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
 
             if (body != null) {
                 connection.doOutput = true
@@ -49,7 +58,8 @@ internal class HttpTransport(private val apiUrl: String, private val writeKey: S
 
             val status = connection.responseCode
             val stream = if (status >= 400) connection.errorStream else connection.inputStream
-            HttpResult(status, stream?.bufferedReader()?.use { it.readText() }.orEmpty())
+            val received = connection.headerFields.orEmpty().mapNotNull { (name, values) -> name?.let { it.lowercase() to values.lastOrNull().orEmpty() } }.toMap()
+            HttpResult(status, stream?.bufferedReader()?.use { it.readText() }.orEmpty(), received)
         } catch (e: IOException) {
             HttpResult(0, e.message.orEmpty())
         } finally {

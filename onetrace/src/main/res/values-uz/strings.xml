@@ -5,4 +5,10 @@
     <string name="onetrace_feed_empty">Bu yerda doʻkonning takliflari va yangiliklari paydo boʻladi.</string>
     <string name="onetrace_feed_dismiss">Olib tashlash</string>
     <string name="onetrace_feed_pinned">Mahkamlangan</string>
+    <string name="onetrace_channel_name">Bildirishnomalar</string>
+    <string name="onetrace_live_channel_name">Buyurtma va yetkazib berish holati</string>
+    <string name="onetrace_live_completed">Yakunlandi</string>
+    <string name="onetrace_live_step">%1$d-bosqich, jami %2$d</string>
+    <string name="onetrace_carousel_previous">Oldingi</string>
+    <string name="onetrace_carousel_next">Keyingi</string>
 </resources>

@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "onetrace-android"
-include(":onetrace", ":onetrace-fcm")
+include(":onetrace", ":onetrace-fcm", ":onetrace-location")

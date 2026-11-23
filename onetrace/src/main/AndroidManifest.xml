@@ -1,11 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Android 16 Live Updates: order status promoted to the status bar and the lock screen (a normal permission). -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+
     <application>
         <activity
             android:name="pro.onetrace.sdk.OneTraceFeedActivity"
             android:exported="false"
             android:theme="@style/OneTraceFeedTheme" />
+
+        <!-- Carousel paging, «Close», «Remind me later» and Live Update swipes inside OneTrace notifications. -->
+        <receiver
+            android:name="pro.onetrace.sdk.internal.PushActionReceiver"
+            android:exported="false" />
     </application>
 
 </manifest>

@@ -8,6 +8,7 @@ import androidx.core.app.NotificationManagerCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import pro.onetrace.sdk.OneTraceConfig
+import pro.onetrace.sdk.OneTraceRemoteConfig
 import java.util.UUID
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
@@ -26,6 +27,8 @@ internal class Client(
     val device: DeviceContext,
     private val clock: () -> Long = System::currentTimeMillis,
     private val notificationsEnabled: () -> Boolean = { NotificationManagerCompat.from(context).areNotificationsEnabled() },
+    val remoteConfig: OneTraceRemoteConfig = OneTraceRemoteConfig(),
+    private val locationPermission: () -> String = { LocationPermission.of(context) },
 ) {
     /** Shows in-app messages; set by [pro.onetrace.sdk.OneTrace] (null in tests that do not need it). */
     @Volatile
@@ -39,12 +42,42 @@ internal class Client(
     @Volatile
     var inAppPaused = false
 
+    /** The app passes push data to the SDK (the config flag, or the `onetrace-fcm` module): rich push can be sent. */
+    @Volatile
+    var richPush = config.richPush || storage.richPush || fcmServiceDeclared()
+        private set
+
+    /** The `onetrace-fcm` module or the app's own service passes push data to the SDK. */
+    fun richPushHandled() {
+        if (!richPush) {
+            richPush = true
+            storage.richPush = true
+            refreshRegistration()
+        }
+    }
+
+    /** The bundled service of `onetrace-fcm` is in the app manifest: it passes every OneTrace message to the SDK. */
+    private fun fcmServiceDeclared(): Boolean = try {
+        context.packageManager.getServiceInfo(android.content.ComponentName(context, "pro.onetrace.sdk.fcm.OneTraceMessagingService"), 0)
+        true
+    } catch (e: Exception) {
+        false
+    }
+
     /** The message feed of the current anonymous id. */
     val feed = Feed(transport, executor, { storage.anonymousId }, config.openPushLinks, ::log, clock)
 
+    private val configStore = RemoteConfigStore(context, transport, config.remoteConfigMinFetchIntervalSeconds * 1000, clock).also {
+        remoteConfig.store = it
+        remoteConfig.fetcher = { force, done -> run { done(fetchConfigNow(force)) } }
+    }
+
     fun start() {
         executor.scheduleWithFixedDelay({ flushNow() }, config.flushIntervalSeconds, config.flushIntervalSeconds, TimeUnit.SECONDS)
-        run { registerNow(force = true) }
+        run {
+            registerNow(force = true)
+            fetchConfigNow(force = false)
+        }
     }
 
     fun track(event: String, properties: Map<String, Any?>) = run {
@@ -75,6 +108,9 @@ internal class Client(
         // signature re-registers too: with a required signature an unsigned user id was not accepted.
         if (changed || signed) {
             registerNow(force = false)
+            // The app settings depend on the profile: the platform gets the identify first.
+            flushNow()
+            fetchConfigNow(force = true)
         }
     }
 
@@ -93,6 +129,7 @@ internal class Client(
         storage.newAnonymousId()
         registerNow(force = false)
         feed.reset()
+        fetchConfigNow(force = true)
     }
 
     fun flush() = run { flushNow() }
@@ -136,6 +173,7 @@ internal class Client(
         fetchInAppNow()
         presentInApp(null)
         feed.refreshIfWatched(force = false)
+        fetchConfigNow(force = false)
     }
 
     fun appBackground() = run {
@@ -153,38 +191,84 @@ internal class Client(
     fun handlePushIntent(intent: Intent?, launcher: Context): Boolean {
         val token = intent?.getStringExtra(PUSH_TOKEN) ?: return false
         val url = intent.getStringExtra(PUSH_URL)
+        val action = intent.getStringExtra(PUSH_ACTION)
         intent.removeExtra(PUSH_TOKEN)
-        opened(token, url, launcher)
+        intent.removeExtra(PUSH_ACTION)
+        // A notification action or a carousel card does not close the notification by itself.
+        if (intent.hasExtra(RichNotifications.EXTRA_NOTIFICATION_ID)) {
+            NotificationManagerCompat.from(context).cancel(intent.getIntExtra(RichNotifications.EXTRA_NOTIFICATION_ID, 0))
+            intent.removeExtra(RichNotifications.EXTRA_NOTIFICATION_ID)
+        }
+
+        opened(token, url, launcher, action)
 
         return true
     }
 
     /** A tap on a OneTrace notification shown by the app's own code; false when the data is not from OneTrace. */
-    fun notificationOpened(data: Map<String, String>, launcher: Context): Boolean {
+    fun notificationOpened(data: Map<String, String>, launcher: Context, actionId: String? = null): Boolean {
         val token = data[PUSH_TOKEN] ?: return false
-        opened(token, data[PUSH_URL], launcher)
+
+        if (actionId == null) {
+            opened(token, data[PUSH_URL], launcher, null)
+            return true
+        }
+
+        val button = PushButton.list(data[RichNotifications.BUTTONS]).firstOrNull { it.id == actionId }
+
+        when (button?.action) {
+            PushButton.DISMISS -> Unit
+            PushButton.SNOOZE -> {
+                RichNotifications.snooze(context, data, button)
+                actionTapped(token, actionId)
+            }
+            PushButton.OPEN_APP -> opened(token, null, launcher, actionId)
+            PushButton.OPEN_URL -> opened(token, button.url, launcher, actionId)
+            else -> opened(token, data[PUSH_URL], launcher, actionId)
+        }
 
         return true
     }
 
-    /** Reports the tap once: the launch intent and a wrapper (firebase_messaging and the like) may both pass it on. */
-    private fun opened(token: String, link: String?, launcher: Context) {
-        synchronized(openedTokens) {
-            if (!openedTokens.add(token)) {
-                return
-            }
+    /** A button that neither opens the app nor a link («Remind me later»): the tap is reported once. */
+    fun actionTapped(token: String, actionId: String) {
+        if (remember(token, actionId)) {
+            run { pushEventNow(token, "opened", null, actionId) }
+        }
+    }
 
-            if (openedTokens.size > 50) {
-                openedTokens.remove(openedTokens.first())
-            }
+    /** Reports the tap once: the launch intent and a wrapper (firebase_messaging and the like) may both pass it on. */
+    private fun opened(token: String, link: String?, launcher: Context, action: String?) {
+        if (!remember(token, action)) {
+            return
         }
 
         val url = link?.takeIf { it.isNotBlank() }
-        run { pushEventNow(token, "opened", url) }
+        run { pushEventNow(token, "opened", url, action) }
 
         if (config.openPushLinks && url != null && !Links.open(launcher, url)) {
             log("No app can open $url")
         }
+    }
+
+    /** The last 50 taps, a button counted apart from the notification itself; false for a repeated one. */
+    private fun remember(token: String, action: String?): Boolean = synchronized(openedTokens) {
+        if (!openedTokens.add(if (action == null) token else "$token#$action")) {
+            return false
+        }
+
+        if (openedTokens.size > 50) {
+            openedTokens.remove(openedTokens.first())
+        }
+
+        true
+    }
+
+    /** A Live Update was shown (`started`) or swiped away (`dismissed`) on this installation. */
+    fun liveUpdateEvent(type: String, key: String, event: String) = run {
+        val body = JSONObject().put("installationId", storage.installationId).put("type", type).put("key", key).put("event", event)
+        val result = transport.post("/live-activities", body)
+        log("Live Update $event reported: HTTP ${result.status}")
     }
 
     /** The app received a OneTrace notification (FCM onMessageReceived): the message is delivered. */
@@ -192,6 +276,9 @@ internal class Client(
         val token = data[PUSH_TOKEN] ?: return
         run { pushEventNow(token, "received", null) }
     }
+
+    /** A GET for the other OneTrace modules, on their thread; with the ETag of what they fetched before. */
+    fun apiGet(path: String, etag: String?): HttpResult = transport.get(path, etag?.let { mapOf("If-None-Match" to it) } ?: emptyMap())
 
     /** Asks the platform for in-app messages now. */
     fun fetchInApp() = run {
@@ -314,6 +401,15 @@ internal class Client(
         shown.forEach(show)
     }
 
+    /** SDK thread: fetches the app settings and tells the listeners what changed; false when they could not be fetched. */
+    private fun fetchConfigNow(force: Boolean): Boolean {
+        val fetched = configStore.fetch(force, storage.anonymousId, device.packageName, device.appVersion)
+        val changed = fetched.changed ?: return false.also { log("App settings were not fetched") }
+        remoteConfig.changed(changed)
+
+        return true
+    }
+
     private fun registerNow(force: Boolean) {
         val payload = registration()
         val fingerprint = payload.toString()
@@ -347,13 +443,16 @@ internal class Client(
             .put("device", JSONObject().put("manufacturer", android.os.Build.MANUFACTURER).put("model", android.os.Build.MODEL))
             .put("locale", device.locale)
             .put("timezone", device.timezone)
-            .put("push", if (token == null) JSONObject().put("enabled", false) else JSONObject().put("provider", storage.pushProvider ?: "fcm").put("token", token).put("enabled", notificationsEnabled()))
+            .put("push", (if (token == null) JSONObject().put("enabled", false) else JSONObject().put("provider", storage.pushProvider ?: "fcm").put("token", token).put("enabled", notificationsEnabled()))
+                .put("capabilities", JSONArray(if (richPush) PUSH_CAPABILITIES else emptyList())))
+            .put("location", JSONObject().put("permission", locationPermission()))
             .put("sdk", JSONObject().put("name", sdkName).put("version", sdkVersion))
     }
 
-    private fun pushEventNow(token: String, event: String, url: String?) {
+    private fun pushEventNow(token: String, event: String, url: String?, action: String? = null) {
         val body = JSONObject().put("token", token).put("event", event)
         url?.let { body.put("url", it) }
+        action?.let { body.put("action", it) }
         val result = transport.post("/push/events", body)
         log("Push $event reported: HTTP ${result.status}")
     }
@@ -369,6 +468,14 @@ internal class Client(
         const val PUSH_TOKEN = "cdp_token"
         const val PUSH_URL = "cdp_url"
         const val PUSH_IMAGE = "cdp_image"
+        const val PUSH_KIND = "cdp_kind"
+        const val PUSH_LIVE = "cdp_live"
+
+        /** The button of a notification action in the launch intent (not part of the push data). */
+        const val PUSH_ACTION = "cdp_action"
+
+        /** What this SDK draws itself once the app passes push data to it. */
+        val PUSH_CAPABILITIES = listOf("rich", "live_updates", "silent")
         private const val BATCH_SIZE = 100
     }
 }

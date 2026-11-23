@@ -5,4 +5,10 @@
     <string name="onetrace_feed_empty">As ofertas e novidades da loja aparecerão aqui.</string>
     <string name="onetrace_feed_dismiss">Remover</string>
     <string name="onetrace_feed_pinned">Fixado</string>
+    <string name="onetrace_channel_name">Notificações</string>
+    <string name="onetrace_live_channel_name">Status do pedido e da entrega</string>
+    <string name="onetrace_live_completed">Concluído</string>
+    <string name="onetrace_live_step">Etapa %1$d de %2$d</string>
+    <string name="onetrace_carousel_previous">Anterior</string>
+    <string name="onetrace_carousel_next">Próximo</string>
 </resources>

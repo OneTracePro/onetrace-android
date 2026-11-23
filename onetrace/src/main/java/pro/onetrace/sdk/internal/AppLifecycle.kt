@@ -8,6 +8,7 @@ import android.os.Looper
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import pro.onetrace.sdk.OneTraceModules
 
 /**
  * App foreground and background from the process lifecycle; activities for automatic screens and for taps on push
@@ -47,7 +48,12 @@ internal class AppLifecycle(private val client: Client, private val trackScreens
         }
     }
 
-    override fun onActivityResumed(activity: Activity) = inApp.resumed(activity)
+    override fun onActivityResumed(activity: Activity) {
+        inApp.resumed(activity)
+        // A permission prompt or the settings may have changed the location permission: registered only on a change.
+        client.refreshRegistration()
+        OneTraceModules.resumed(activity)
+    }
 
     override fun onActivityPaused(activity: Activity) = inApp.paused(activity)
 

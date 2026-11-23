@@ -15,6 +15,7 @@ import pro.onetrace.sdk.internal.DeviceContext
 import pro.onetrace.sdk.internal.EventQueue
 import pro.onetrace.sdk.internal.HttpTransport
 import pro.onetrace.sdk.internal.InAppPresenter
+import pro.onetrace.sdk.internal.RichNotifications
 import pro.onetrace.sdk.internal.Storage
 import java.io.File
 import java.util.concurrent.Executors
@@ -51,7 +52,7 @@ public object OneTrace {
         val executor = Executors.newSingleThreadScheduledExecutor { runnable -> Thread(runnable, "onetrace").apply { isDaemon = true } }
         val transport = HttpTransport(config.apiUrl, config.writeKey, "onetrace-android/${BuildConfig.SDK_VERSION} (${app.packageName})")
         val queue = EventQueue(File(app.filesDir, "onetrace-queue.jsonl"), config.maxQueueSize)
-        val created = Client(app, config, storage, queue, transport, executor, device)
+        val created = Client(app, config, storage, queue, transport, executor, device, remoteConfig = remoteConfig)
         val inApp = InAppPresenter(config.openPushLinks) { token, event, url -> created.reportInApp(token, event, url) }
         created.presenter = inApp::present
         client = created
@@ -104,6 +105,13 @@ public object OneTrace {
     public fun reset() {
         client?.reset()
     }
+
+    /**
+     * App settings from OneTrace (Remote Config): `OneTrace.remoteConfig.getBoolean("new_checkout", false)`. The same
+     * object before and after [init]; before it and before the first answer the getters return stored values or defaults.
+     */
+    @JvmStatic
+    public val remoteConfig: OneTraceRemoteConfig = OneTraceRemoteConfig()
 
     /** Sends queued events now instead of waiting for the next batch. */
     @JvmStatic
@@ -231,7 +239,35 @@ public object OneTrace {
      * @return true when the data came from a OneTrace notification.
      */
     @JvmStatic
-    public fun notificationOpened(context: Context, data: Map<String, String>): Boolean = client?.notificationOpened(data, context) ?: false
+    @JvmOverloads
+    public fun notificationOpened(context: Context, data: Map<String, String>, actionId: String? = null): Boolean = client?.notificationOpened(data, context, actionId) ?: false
+
+    /**
+     * Push data from OneTrace (FCM `RemoteMessage.data` or the data a wrapper passes on): draws the notification — a
+     * carousel, a countdown, buttons — or updates the Live Update, and reports the message as received. A silent check
+     * (`cdp_kind=ping`) shows and reports nothing. The `onetrace-fcm` module calls it; call it from your own
+     * `FirebaseMessagingService` and set `richPush = true` in [OneTraceConfig].
+     *
+     * Images are downloaded on the calling thread (up to 10 seconds); on the main thread the work moves to a background one.
+     *
+     * @return false when the data is not from OneTrace and is yours to handle.
+     */
+    @JvmStatic
+    public fun handlePushData(context: Context, data: Map<String, String>): Boolean {
+        if (!RichNotifications.isOneTrace(data)) {
+            return false
+        }
+
+        val app = context.applicationContext ?: context
+
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            pushExecutor.execute { RichNotifications.handle(app, data, client) }
+        } else {
+            RichNotifications.handle(app, data, client)
+        }
+
+        return true
+    }
 
     /** A OneTrace notification reached the app (`onMessageReceived`): the message becomes delivered. */
     @JvmStatic
@@ -239,9 +275,9 @@ public object OneTrace {
         client?.pushReceived(data)
     }
 
-    /** True when the data came from a OneTrace notification. */
+    /** True when the data came from OneTrace: a notification, a Live Update or a silent check. */
     @JvmStatic
-    public fun isOneTraceNotification(data: Map<String, String>): Boolean = data.containsKey(Client.PUSH_TOKEN)
+    public fun isOneTraceNotification(data: Map<String, String>): Boolean = RichNotifications.isOneTrace(data)
 
     @JvmStatic
     public val anonymousId: String? get() = client?.anonymousId
@@ -277,6 +313,11 @@ public object OneTrace {
             Handler(Looper.getMainLooper()).post { inApp?.resumed(activity) }
         }
     }
+
+    private val pushExecutor by lazy { Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "onetrace-push").apply { isDaemon = true } } }
+
+    /** The initialized SDK, for the notification receivers and the other modules. */
+    internal val currentClient: Client? get() = client
 
     /** The feed of the initialized SDK, for [OneTraceFeedView]. */
     internal val feed: pro.onetrace.sdk.internal.Feed? get() = client?.feed

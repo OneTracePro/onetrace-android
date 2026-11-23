@@ -5,4 +5,10 @@
     <string name="onetrace_feed_empty">Mağazanın teklifleri ve haberleri burada görünecek.</string>
     <string name="onetrace_feed_dismiss">Kaldır</string>
     <string name="onetrace_feed_pinned">Sabitlendi</string>
+    <string name="onetrace_channel_name">Bildirimler</string>
+    <string name="onetrace_live_channel_name">Sipariş ve teslimat durumu</string>
+    <string name="onetrace_live_completed">Tamamlandı</string>
+    <string name="onetrace_live_step">Adım %1$d / %2$d</string>
+    <string name="onetrace_carousel_previous">Önceki</string>
+    <string name="onetrace_carousel_next">Sonraki</string>
 </resources>

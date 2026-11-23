@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Rich push drawn by the core SDK, without Firebase: `OneTrace.handlePushData(context, data)` draws carousels (paged with «‹ ›», a tap on a card opens its link and reports the click), countdowns (a chronometer, removed at the end) and up to three buttons — open a link, open the app, close, and «Remind me later» as a local notification in 60 or 180 minutes or tomorrow at 9:00. Images download in parallel, up to 10 seconds and 1 MB each; cards without an image are skipped. `onetrace-fcm` now passes every OneTrace message to it.
+- `notificationOpened(context, data, actionId)`: button taps are reported with the button; the memory of the last 50 taps counts a button apart from the notification.
+- Android Live Updates: one notification per type and key updated in place — a Live Update on Android 16 (`ProgressStyle`, promoted ongoing), an ongoing notification with progress and a countdown before it; the shown notification and a swipe are reported to the platform, a swiped one comes back only with `start`.
+- Silent checks (`cdp_kind=ping`) show and report nothing.
+- The installation reports `push.capabilities` (`rich`, `live_updates`, `silent` — with `onetrace-fcm` or `richPush = true` in the config) and `location.permission`.
+- Remote Config: `OneTrace.remoteConfig` with `getString`, `getBoolean`, `getLong`, `getDouble`, `getJson`, `fetch` and change listeners; fetched at launch and when the app opens at most once per `remoteConfigMinFetchIntervalSeconds` (an hour), right after `identify` and `reset`, with an ETag; stored values offline.
+- New module `onetrace-location`: geofences with Google Play services — `OneTraceLocation.enableGeofences`, `disableGeofences`, `maxMonitored` (90 nearest zones and an update region), `requestLocationPermission()` for the app to call; `geofence_entered`, `geofence_dwelled` and `geofence_exited` with `dwell_seconds`, no coordinates, no re-entry within 30 minutes; registered again after a restart and an app update.
+- `compileSdk` 36; `minSdk` stays 21.
+
 ## 1.2.0 — 2026-11-09
 
 - Message feed: cards that stay in the app until they expire or the user removes them. `OneTrace.openFeed(context)` opens the ready-made screen (`OneTraceFeedActivity`), `OneTraceFeedView` puts the feed into your own one: the three card layouts, pinned cards, the remove button, an empty state, pull-to-refresh, light and dark colors, texts in 10 languages. Cards at least half visible are reported shown, taps report the click and open the link.

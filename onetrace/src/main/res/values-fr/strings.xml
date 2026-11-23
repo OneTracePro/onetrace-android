@@ -5,4 +5,10 @@
     <string name="onetrace_feed_empty">Les offres et actualités de la boutique apparaîtront ici.</string>
     <string name="onetrace_feed_dismiss">Retirer</string>
     <string name="onetrace_feed_pinned">Épinglé</string>
+    <string name="onetrace_channel_name">Notifications</string>
+    <string name="onetrace_live_channel_name">Suivi de commande et de livraison</string>
+    <string name="onetrace_live_completed">Terminé</string>
+    <string name="onetrace_live_step">Étape %1$d sur %2$d</string>
+    <string name="onetrace_carousel_previous">Précédent</string>
+    <string name="onetrace_carousel_next">Suivant</string>
 </resources>

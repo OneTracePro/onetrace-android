@@ -22,9 +22,11 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
       - name: Unit tests (Robolectric), release builds, Maven publication as JitPack builds it
-        run: ./gradlew --no-daemon :onetrace:testDebugUnitTest :onetrace:assembleRelease :onetrace-fcm:assembleRelease :onetrace:publishReleasePublicationToMavenLocal :onetrace-fcm:publishReleasePublicationToMavenLocal
+        run: ./gradlew --no-daemon :onetrace:testDebugUnitTest :onetrace-location:testDebugUnitTest :onetrace:assembleRelease :onetrace-fcm:assembleRelease :onetrace-location:assembleRelease :onetrace:publishReleasePublicationToMavenLocal :onetrace-fcm:publishReleasePublicationToMavenLocal :onetrace-location:publishReleasePublicationToMavenLocal
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: test-reports
-          path: onetrace/build/reports/tests
+          path: |
+            onetrace/build/reports/tests
+            onetrace-location/build/reports/tests

@@ -47,6 +47,11 @@ internal class Storage(context: Context) {
         get() = prefs.getString(REGISTRATION, null)
         set(value) = prefs.edit().putString(REGISTRATION, value).apply()
 
+    /** The app passed push data to the SDK once: rich push stays reported on the next launches. */
+    var richPush: Boolean
+        get() = prefs.getBoolean(RICH_PUSH, false)
+        set(value) = prefs.edit().putBoolean(RICH_PUSH, value).apply()
+
     fun newAnonymousId(): String = UUID.randomUUID().toString().also { anonymousId = it }
 
     private companion object {
@@ -59,5 +64,6 @@ internal class Storage(context: Context) {
         const val PUSH_TOKEN = "push_token"
         const val PUSH_PROVIDER = "push_provider"
         const val REGISTRATION = "registration"
+        const val RICH_PUSH = "rich_push"
     }
 }
