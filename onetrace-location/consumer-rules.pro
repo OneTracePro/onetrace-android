@@ -1,1 +1,2 @@
-# The SDK uses no reflection; nothing to keep.
+# The Flutter and React Native wrappers check for this module by its class name.
+-keepnames class pro.onetrace.sdk.location.OneTraceLocation
