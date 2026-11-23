@@ -425,6 +425,27 @@ class PushTest {
     }
 
     @Test
+    fun aStaleTimeAfterTheEndOfTheCountdownKeepsItCompleted() {
+        client()
+        val now = System.currentTimeMillis()
+        receive(live("start", "On the way", 3) {
+            it.getJSONObject("state").put("endsAt", (now + 500) / 1000.0)
+            it.put("staleAt", now / 1000 + 600)
+        })
+
+        val alarms = shadowOf(app.getSystemService(AlarmManager::class.java))
+        val alarm = { action: String -> alarms.scheduledAlarms.single { shadowOf(it.operation).savedIntent.action == action } }
+        val stale = alarm(PushActionReceiver.LIVE_STALE)
+        deliver(alarm(PushActionReceiver.LIVE_COMPLETED).operation!!)
+        assertEquals("Completed", notifications().single().extras.getString(Notification.EXTRA_TEXT))
+
+        deliver(stale.operation!!)
+        val shown = notifications().single()
+        assertEquals("Completed", shown.extras.getString(Notification.EXTRA_TEXT))
+        assertEquals(0, shown.flags and Notification.FLAG_ONGOING_EVENT)
+    }
+
+    @Test
     fun aSwipedLiveUpdateIsReportedAndOnlyStartBringsItBack() {
         client()
         receive(live("start", "Placed", 1))

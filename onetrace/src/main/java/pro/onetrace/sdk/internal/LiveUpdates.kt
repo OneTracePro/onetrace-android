@@ -92,13 +92,17 @@ internal object LiveUpdates {
         }
     }
 
-    /** The stale time of the current state came: the same notification, marked «out of date», without a sound. */
+    /**
+     * The stale time of the current state came: the same notification, marked «out of date», without a sound. After
+     * the end of the countdown («Completed») and after `end` (no current state) nothing changes.
+     */
     fun stale(context: Context, type: String, key: String) {
         val tag = "onetrace_live:$type:$key"
         val data = RichNotifications.data(prefs(context).getString("data:$tag", null))
         val live = parse(data[Client.PUSH_LIVE]) ?: return
+        val countdownOver = endsAt(live.state)?.let { it <= System.currentTimeMillis() + 1000 } ?: false
 
-        if (live.staleAt != null) {
+        if (live.staleAt != null && !countdownOver) {
             post(context, data, live, ongoing = true, completed = false, timeout = null, alert = false)
         }
     }
