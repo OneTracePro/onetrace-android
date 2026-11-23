@@ -9,6 +9,7 @@
     <string name="onetrace_live_channel_name">订单和配送状态</string>
     <string name="onetrace_live_completed">已完成</string>
     <string name="onetrace_live_step">第 %1$d 步，共 %2$d 步</string>
+    <string name="onetrace_live_stale">已过时</string>
     <string name="onetrace_carousel_previous">上一个</string>
     <string name="onetrace_carousel_next">下一个</string>
 </resources>

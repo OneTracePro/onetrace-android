@@ -62,6 +62,7 @@ public object OneTrace {
         created.start()
         (app as? Application)?.let { AppLifecycle(created, config.trackActivityScreens, inApp).attach(it) }
             ?: Log.w(Client.TAG, "OneTrace.init() needs the application context: lifecycle and push taps are not tracked")
+        OneTraceModules.initialized()
     }
 
     /** Your own event, for example `track("order_completed", mapOf("order_id" to "1001", "amount" to 1250.5))`. */

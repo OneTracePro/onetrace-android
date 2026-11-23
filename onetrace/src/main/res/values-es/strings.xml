@@ -9,6 +9,7 @@
     <string name="onetrace_live_channel_name">Estado del pedido y la entrega</string>
     <string name="onetrace_live_completed">Completado</string>
     <string name="onetrace_live_step">Paso %1$d de %2$d</string>
+    <string name="onetrace_live_stale">desactualizado</string>
     <string name="onetrace_carousel_previous">Anterior</string>
     <string name="onetrace_carousel_next">Siguiente</string>
 </resources>

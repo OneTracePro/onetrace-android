@@ -11,6 +11,8 @@ import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingRequest
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.Tasks
+import java.util.concurrent.TimeUnit
 
 /** Geofences of Google Play services (`GeofencingClient`): the transitions come to [GeofenceTransitionReceiver]. */
 internal object PlayGeofenceRegistrar : GeofenceRegistrar {
@@ -20,8 +22,9 @@ internal object PlayGeofenceRegistrar : GeofenceRegistrar {
         false
     }
 
+    /** Blocks the geofence thread until the system answers: the next set never overlaps this one. */
     @SuppressLint("MissingPermission")
-    override fun register(context: Context, zones: List<GeofenceZone>, region: Region?) {
+    override fun register(context: Context, zones: List<GeofenceZone>, region: Region?): Boolean {
         val client = LocationServices.getGeofencingClient(context)
         val pending = pendingIntent(context)
         val fences = zones.map { zone ->
@@ -42,22 +45,30 @@ internal object PlayGeofenceRegistrar : GeofenceRegistrar {
                 .build()
         })
 
-        client.removeGeofences(pending).addOnCompleteListener {
-            if (fences.isEmpty()) {
-                return@addOnCompleteListener
+        return try {
+            Tasks.await(client.removeGeofences(pending), TIMEOUT_SECONDS, TimeUnit.SECONDS)
+
+            if (fences.isNotEmpty()) {
+                val request = GeofencingRequest.Builder().setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_ENTER).addGeofences(fences).build()
+                Tasks.await(client.addGeofences(request, pending), TIMEOUT_SECONDS, TimeUnit.SECONDS)
             }
 
-            try {
-                client.addGeofences(GeofencingRequest.Builder().setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_ENTER).addGeofences(fences).build(), pending)
-            } catch (e: SecurityException) {
-                // The permission was revoked meanwhile: enabled again when it is granted.
-            }
+            true
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            false
+        } catch (e: Exception) {
+            // Location turned off (GEOFENCE_NOT_AVAILABLE), the permission revoked meanwhile, no answer: tried again on
+            // the next resume of the app.
+            false
         }
     }
 
     override fun clear(context: Context) {
         LocationServices.getGeofencingClient(context).removeGeofences(pendingIntent(context))
     }
+
+    private const val TIMEOUT_SECONDS = 10L
 
     private fun pendingIntent(context: Context): PendingIntent {
         // Play services fill in the transition: the intent must be mutable on Android 12+.

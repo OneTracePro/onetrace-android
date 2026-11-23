@@ -38,7 +38,7 @@ dependencies {
 }
 ```
 
-Rich push, Live Updates, Remote Config and `onetrace-location` are not released yet (see «Unreleased» in the [changelog](CHANGELOG.md)). Until then the Flutter and React Native wrappers take this branch from the local Maven repository:
+Rich push, Live Updates, Remote Config and `onetrace-location` are not released yet (see «Unreleased» in the [changelog](CHANGELOG.md)). Until then the Flutter and React Native wrappers take a commit of this branch from JitPack (`com.github.OneTracePro.onetrace-android:onetrace:<short commit>`), or this working copy from the local Maven repository when the app sets the Gradle property `onetrace.mavenLocal=true`:
 
 ```bash
 ./gradlew :onetrace:publishReleasePublicationToMavenLocal :onetrace-fcm:publishReleasePublicationToMavenLocal :onetrace-location:publishReleasePublicationToMavenLocal
@@ -143,7 +143,7 @@ If your own code shows the notification and handles its buttons, report the tap 
 
 ### Live Updates
 
-Messages of the «Live Activity» kind — order and delivery status, a countdown — keep one notification per type and key and update it in place. On Android 16 it is a Live Update (`ProgressStyle` with the steps as segments, promoted to the status bar; the SDK declares `POST_PROMOTED_NOTIFICATIONS`), before it an ongoing notification with the progress, «Step 2 of 4» and a countdown. When the countdown is over the notification shows «Completed»; `end` shows the final state and the system removes it after «Dismiss after N minutes». The SDK reports the shown notification (`started`) and a swipe (`dismissed`); after a swipe updates do not bring it back, only a new `start` does. They use the `onetrace_live` channel; set your own with the `pro.onetrace.live_channel` meta-data.
+Messages of the «Live Activity» kind — order and delivery status, a countdown — keep one notification per type and key and update it in place. On Android 16 it is a Live Update (`ProgressStyle` with the steps as segments, promoted to the status bar; the SDK declares `POST_PROMOTED_NOTIFICATIONS`), before it an ongoing notification with the progress, «Step 2 of 4» and a countdown. When the countdown is over the notification shows «Completed»; `end` shows the final state and the system removes it after «Dismiss after N minutes». The SDK reports the shown notification (`started`) and a swipe (`dismissed`); after a swipe updates do not bring it back, only a new `start` does. An update sent with «Notify» (`alert`) sounds and shows a banner through the messages channel; the others change the notification silently. From the stale time of the state («Stale after») the notification says «out of date» until the next update. They use the `onetrace_live` channel; set your own with the `pro.onetrace.live_channel` meta-data.
 
 ## Remote Config
 
@@ -167,7 +167,7 @@ The SDK fetches the values when the app starts and opens, at most once an hour (
 implementation("com.github.OneTracePro.onetrace-android:onetrace-location:<version>")
 ```
 
-The module uses Google Play services (`play-services-location`); the core stays without it. Zones come from **Apps → Geofences**: the SDK fetches the list at launch and every 12 hours, monitors the 90 nearest zones (`OneTraceLocation.maxMonitored`; Android allows 100 per app) and selects them again when the device leaves the area around them or the list changes. A removed or switched off zone stops being monitored with the next list.
+The module uses Google Play services (`play-services-location`) and declares the location permissions; the core stays without them, so an app without geofences does not get them. Zones come from **Apps → Geofences**: the SDK fetches the list at launch and every 12 hours, monitors the 90 nearest zones (`OneTraceLocation.maxMonitored`; Android allows 100 per app) and selects them again when the device leaves the area around them or the list changes. A removed or switched off zone stops being monitored with the next list.
 
 The SDK never asks for the location permission itself — ask when it makes sense in your app:
 
@@ -182,7 +182,9 @@ when (OneTraceLocation.enableGeofences(context)) {
 }
 ```
 
-Without the background permission nothing is registered and the reason is returned; once the user grants it, the zones turn on when the app comes back, without a restart. The installation reports `location.permission` (`none`, `foreground`, `always`) for segments. The module declares `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`, `ACCESS_BACKGROUND_LOCATION` (Google Play asks why the app needs it) and `RECEIVE_BOOT_COMPLETED`: after a restart of the phone and an app update the zones are registered again.
+Call `OneTrace.init` in `Application.onCreate()` (as in the quick start, not later from an activity): Android starts the app in the background for a zone transition, a restart of the phone or an app update, and only `Application.onCreate()` runs then. A transition that comes before `OneTrace.init` is kept with its time and sent after it, and the zones are registered again after a restart of the phone without it; the list is fetched once the SDK is started. Call `enableGeofences` at every start of the app: it registers the zones again (after a reinstall Auto Backup restores the settings of the SDK, but not the zones in the system).
+
+Without the background permission nothing is registered and the reason is returned; once the user grants it, the zones turn on when the app comes back, without a restart. The installation reports `location.permission` (`none`, `foreground`, `always`) for segments. The module declares `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`, `ACCESS_BACKGROUND_LOCATION` (Google Play asks why the app needs it) and `RECEIVE_BOOT_COMPLETED`: after a restart of the phone and an app update the zones are registered again. When location is turned off, the system drops the zones; the SDK registers them again when the app comes back with location on.
 
 Events go through the usual queue (they wait offline) and count as events of the plan:
 

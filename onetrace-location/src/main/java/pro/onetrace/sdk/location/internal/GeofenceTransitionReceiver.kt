@@ -3,6 +3,7 @@ package pro.onetrace.sdk.location.internal
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.google.android.gms.location.GeofenceStatusCodes
 import com.google.android.gms.location.GeofencingEvent
 
 /** Transitions of the registered zones from Google Play services. */
@@ -11,6 +12,10 @@ internal class GeofenceTransitionReceiver : BroadcastReceiver() {
         val event = GeofencingEvent.fromIntent(intent) ?: return
 
         if (event.hasError()) {
+            // Location was turned off: the system dropped every zone of the app.
+            if (event.errorCode == GeofenceStatusCodes.GEOFENCE_NOT_AVAILABLE) {
+                Geofences.unavailable(context.applicationContext ?: context)
+            }
             return
         }
 

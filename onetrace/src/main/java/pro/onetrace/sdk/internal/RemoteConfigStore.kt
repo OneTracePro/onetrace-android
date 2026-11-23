@@ -38,7 +38,9 @@ internal class RemoteConfigStore(
         val etag = prefs.getString(ETAG, null)?.takeIf { prefs.getString(ETAG_FOR, null) == anonymousId }
         val result = transport.get("/app/config?$query", etag?.let { mapOf("If-None-Match" to it) } ?: emptyMap())
 
-        if (result.status == 304) {
+        // 304, and a refusal that the next request would get too (402 without the plan's feature, other 4xx but 429):
+        // the stored values stay and the next request waits for the interval instead of every launch.
+        if (result.status == 304 || (result.status in 400..499 && result.status != 429)) {
             prefs.edit().putLong(FETCHED_AT, clock()).apply()
             return Fetched(emptySet())
         }

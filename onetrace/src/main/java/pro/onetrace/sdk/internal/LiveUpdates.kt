@@ -20,14 +20,16 @@ import kotlin.math.roundToInt
  * Order and delivery status in one notification per type and key (`cdp_kind=live`, `cdp_live`), updated in place: a
  * Live Update on Android 16 (`ProgressStyle`, promoted ongoing), an ongoing notification with progress and a countdown
  * before it. `end` shows the final state and lets the system remove it at `dismissAt`; at the end of the countdown the
- * notification becomes «completed». A swiped notification stays away for later updates; only `start` brings it back.
+ * notification becomes «completed», and from `staleAt` it is marked «out of date» until a fresh update. `alert: true`
+ * («Notify» in the template) makes an update sound with a banner; other updates change it silently. A swiped notification
+ * stays away for later updates; only `start` brings it back.
  */
 internal object LiveUpdates {
     const val EXTRA_TYPE = "pro.onetrace.live_type"
     const val EXTRA_KEY = "pro.onetrace.live_key"
     private const val ID = 0x4F54
 
-    private class Live(val type: String, val key: String, val event: String, val state: JSONObject, val dismissAt: Long?) {
+    private class Live(val type: String, val key: String, val event: String, val state: JSONObject, val dismissAt: Long?, val staleAt: Long?, val alert: Boolean) {
         val tag: String get() = "onetrace_live:$type:$key"
     }
 
@@ -57,13 +59,14 @@ internal object LiveUpdates {
                 return
             }
 
-            post(context, data, live, ongoing = false, completed = false, timeout = live.dismissAt?.let { it - now })
+            post(context, data, live, ongoing = false, completed = false, timeout = live.dismissAt?.let { it - now }, alert = live.alert)
             return
         }
 
-        post(context, data, live, ongoing = true, completed = false, timeout = null)
+        post(context, data, live, ongoing = true, completed = false, timeout = null, alert = live.alert)
         prefs.edit().putBoolean("active:${live.tag}", true).putString("data:${live.tag}", JSONObject(data).toString()).apply()
-        scheduleCompletion(context, data, live)
+        scheduleCompletion(context, live)
+        scheduleStale(context, live)
 
         if (!active) {
             client?.liveUpdateEvent(live.type, live.key, "started")
@@ -85,7 +88,18 @@ internal object LiveUpdates {
         val endsAt = endsAt(live.state) ?: return
 
         if (endsAt <= System.currentTimeMillis() + 1000) {
-            post(context, data, live, ongoing = false, completed = true, timeout = null)
+            post(context, data, live, ongoing = false, completed = true, timeout = null, alert = false)
+        }
+    }
+
+    /** The stale time of the current state came: the same notification, marked «out of date», without a sound. */
+    fun stale(context: Context, type: String, key: String) {
+        val tag = "onetrace_live:$type:$key"
+        val data = RichNotifications.data(prefs(context).getString("data:$tag", null))
+        val live = parse(data[Client.PUSH_LIVE]) ?: return
+
+        if (live.staleAt != null) {
+            post(context, data, live, ongoing = true, completed = false, timeout = null, alert = false)
         }
     }
 
@@ -99,7 +113,9 @@ internal object LiveUpdates {
         val key = live.optString("key").takeIf { it.isNotEmpty() && it != "null" } ?: ""
         val event = live.optString("event").takeIf { it in listOf("start", "update", "end") } ?: "update"
 
-        return Live(type, key, event, live.optJSONObject("state") ?: JSONObject(), Iso.parse(live.opt("dismissAt")?.takeIf { it != JSONObject.NULL }?.toString()))
+        val time = { name: String -> Iso.parse(live.opt(name)?.takeIf { it != JSONObject.NULL }?.toString()) }
+
+        return Live(type, key, event, live.optJSONObject("state") ?: JSONObject(), time("dismissAt"), time("staleAt"), live.optBoolean("alert", false))
     }
 
     /** `endsAt` of the state: seconds since 1970 (as on iOS) or ISO 8601. */
@@ -121,7 +137,7 @@ internal object LiveUpdates {
         return if (steps.isNotEmpty() && step > 0) (step.coerceAtMost(steps.size) * 100.0 / steps.size).roundToInt() else null
     }
 
-    private fun post(context: Context, data: Map<String, String>, live: Live, ongoing: Boolean, completed: Boolean, timeout: Long?) {
+    private fun post(context: Context, data: Map<String, String>, live: Live, ongoing: Boolean, completed: Boolean, timeout: Long?, alert: Boolean) {
         val manager = NotificationManagerCompat.from(context)
 
         if (!manager.areNotificationsEnabled()) {
@@ -134,16 +150,22 @@ internal object LiveUpdates {
         val title = state.optString("title")
         val status = if (completed) context.getString(R.string.onetrace_live_completed) else state.optString("status").takeIf { it.isNotEmpty() && it != "null" }
             ?: steps.getOrNull(step - 1).orEmpty()
-        val stepText = if (steps.isNotEmpty() && step > 0) context.getString(R.string.onetrace_live_step, step.coerceAtMost(steps.size), steps.size) else null
+        val stale = !completed && live.staleAt != null && live.staleAt <= System.currentTimeMillis() + 1000
+        val stepText = listOfNotNull(
+            if (steps.isNotEmpty() && step > 0) context.getString(R.string.onetrace_live_step, step.coerceAtMost(steps.size), steps.size) else null,
+            if (stale) context.getString(R.string.onetrace_live_stale) else null,
+        ).joinToString(" · ").takeIf { it.isNotEmpty() }
+        // «Notify»: the messages channel of high importance gives the banner and the sound of an ordinary push.
+        val channel = if (alert) PushChannels.messages(context) else PushChannels.live(context)
         val endsAt = endsAt(state)?.takeIf { !completed && it > System.currentTimeMillis() }
         val percent = if (completed) 100 else percent(state)
         val content = RichNotifications.launch(context, data, live.tag.hashCode(), 0, emptyMap())
         val delete = broadcast(context, live, PushActionReceiver.LIVE_DISMISSED)
 
         val notification = if (Build.VERSION.SDK_INT >= 36) {
-            liveUpdate(context, live, title, status, stepText, steps.size, percent, endsAt, ongoing, timeout, content, delete)
+            liveUpdate(context, channel, title, status, stepText, steps.size, percent, endsAt, ongoing, timeout, alert, content, delete)
         } else {
-            NotificationCompat.Builder(context, PushChannels.live(context))
+            NotificationCompat.Builder(context, channel)
                 .setSmallIcon(PushChannels.icon(context))
                 .setContentTitle(title)
                 .setContentText(status)
@@ -151,9 +173,12 @@ internal object LiveUpdates {
                 .setCategory(NotificationCompat.CATEGORY_STATUS)
                 .setOngoing(ongoing)
                 .setAutoCancel(!ongoing)
-                .setOnlyAlertOnce(true)
+                .setOnlyAlertOnce(!alert)
                 .setDeleteIntent(delete)
                 .apply {
+                    if (alert) {
+                        setPriority(NotificationCompat.PRIORITY_HIGH).setDefaults(NotificationCompat.DEFAULT_ALL)
+                    }
                     content?.let(::setContentIntent)
                     percent?.let { setProgress(100, it, false) }
                     endsAt?.let { setWhen(it).setShowWhen(true).setUsesChronometer(true).setChronometerCountDown(true) }
@@ -172,7 +197,7 @@ internal object LiveUpdates {
     /** Android 16: the Live Update with the steps as progress segments, promoted to the status bar while ongoing. */
     @RequiresApi(36)
     @SuppressLint("MissingPermission")
-    private fun liveUpdate(context: Context, live: Live, title: String, status: String, stepText: String?, stepCount: Int, percent: Int?, endsAt: Long?, ongoing: Boolean, timeout: Long?, content: PendingIntent?, delete: PendingIntent): Notification {
+    private fun liveUpdate(context: Context, channel: String, title: String, status: String, stepText: String?, stepCount: Int, percent: Int?, endsAt: Long?, ongoing: Boolean, timeout: Long?, alert: Boolean, content: PendingIntent?, delete: PendingIntent): Notification {
         val style = Notification.ProgressStyle().setStyledByProgress(true)
 
         if (stepCount > 1) {
@@ -183,7 +208,7 @@ internal object LiveUpdates {
 
         percent?.let { style.setProgress(it) }
 
-        return Notification.Builder(context, PushChannels.live(context))
+        return Notification.Builder(context, channel)
             .setSmallIcon(PushChannels.icon(context))
             .setContentTitle(title)
             .setContentText(status)
@@ -191,7 +216,7 @@ internal object LiveUpdates {
             .setCategory(Notification.CATEGORY_STATUS)
             .setOngoing(ongoing)
             .setAutoCancel(!ongoing)
-            .setOnlyAlertOnce(true)
+            .setOnlyAlertOnce(!alert)
             // Notification.EXTRA_REQUEST_PROMOTED_ONGOING: public from API 36.1, read by Android 16.
             .addExtras(android.os.Bundle().apply { putBoolean("android.requestPromotedOngoing", ongoing) })
             .setShortCriticalText(status.take(12).takeIf { it.isNotEmpty() })
@@ -205,15 +230,33 @@ internal object LiveUpdates {
             .build()
     }
 
-    private fun scheduleCompletion(context: Context, data: Map<String, String>, live: Live) {
-        val endsAt = endsAt(live.state)?.takeIf { it > System.currentTimeMillis() } ?: return
-        val pending = broadcast(context, live, PushActionReceiver.LIVE_COMPLETED)
+    private fun scheduleCompletion(context: Context, live: Live) {
+        endsAt(live.state)?.let { alarm(context, it, broadcast(context, live, PushActionReceiver.LIVE_COMPLETED)) }
+    }
+
+    private fun scheduleStale(context: Context, live: Live) {
+        val pending = broadcast(context, live, PushActionReceiver.LIVE_STALE)
+
+        if (live.staleAt == null) {
+            // A fresh state without a stale time: the earlier one no longer applies.
+            context.getSystemService(AlarmManager::class.java).cancel(pending)
+            return
+        }
+
+        alarm(context, live.staleAt, pending)
+    }
+
+    private fun alarm(context: Context, at: Long, pending: PendingIntent) {
+        if (at <= System.currentTimeMillis()) {
+            return
+        }
+
         val alarms = context.getSystemService(AlarmManager::class.java)
 
         if (Build.VERSION.SDK_INT >= 23) {
-            alarms.setAndAllowWhileIdle(AlarmManager.RTC, endsAt, pending)
+            alarms.setAndAllowWhileIdle(AlarmManager.RTC, at, pending)
         } else {
-            alarms.set(AlarmManager.RTC, endsAt, pending)
+            alarms.set(AlarmManager.RTC, at, pending)
         }
     }
 

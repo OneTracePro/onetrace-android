@@ -23,6 +23,7 @@ public object OneTraceModules {
     }
 
     private val resumeListeners = CopyOnWriteArraySet<ResumeListener>()
+    private val initListeners = CopyOnWriteArraySet<Runnable>()
 
     @JvmStatic
     public val isInitialized: Boolean get() = OneTrace.currentClient != null
@@ -36,6 +37,34 @@ public object OneTraceModules {
     public fun get(path: String, etag: String?): Response? {
         val result = OneTrace.currentClient?.apiGet(path, etag) ?: return null
         return Response(result.status, result.body, result.header("ETag"))
+    }
+
+    /**
+     * An event that happened at [timestampMillis], for example a geofence transition recorded before `OneTrace.init`;
+     * sent at once. Dropped before `OneTrace.init`.
+     */
+    @JvmStatic
+    public fun track(event: String, properties: Map<String, Any?>, timestampMillis: Long) {
+        OneTrace.currentClient?.let { client ->
+            client.track(event, properties, timestampMillis)
+            client.flush()
+        }
+    }
+
+    /** Runs [listener] once `OneTrace.init` is called in this process (at once when it already was). */
+    @JvmStatic
+    public fun addInitListener(listener: Runnable) {
+        if (isInitialized) {
+            listener.run()
+            return
+        }
+
+        initListeners.add(listener)
+
+        // Init came between the check and the add.
+        if (isInitialized && initListeners.remove(listener)) {
+            listener.run()
+        }
     }
 
     /** The app passes push data to the SDK: the installation reports the rich push capabilities. */
@@ -64,6 +93,14 @@ public object OneTraceModules {
     @JvmStatic
     public fun showNotification(context: Context, data: Map<String, String>) {
         RichNotifications.show(context.applicationContext ?: context, data)
+    }
+
+    internal fun initialized() {
+        initListeners.toList().forEach { listener ->
+            if (initListeners.remove(listener)) {
+                listener.run()
+            }
+        }
     }
 
     internal fun resumed(activity: Activity) {

@@ -385,6 +385,46 @@ class PushTest {
     }
 
     @Test
+    fun anUpdateWithAlertSoundsAgainWithABannerAndOtherUpdatesStayQuiet() {
+        client()
+        receive(live("start", "Placed", 1))
+        receive(live("update", "Packed", 2))
+        assertTrue(notifications().single().flags and Notification.FLAG_ONLY_ALERT_ONCE != 0)
+
+        receive(live("update", "On the way", 3) { it.put("alert", true) })
+        val alerted = notifications().single()
+        assertEquals("On the way", alerted.extras.getString(Notification.EXTRA_TEXT))
+        assertEquals(0, alerted.flags and Notification.FLAG_ONLY_ALERT_ONCE)
+        // A banner and a sound: a channel of high importance.
+        assertEquals(NotificationManager.IMPORTANCE_HIGH, app.getSystemService(NotificationManager::class.java).getNotificationChannel(alerted.channelId).importance)
+
+        receive(live("update", "Nearby", 3))
+        assertTrue(notifications().single().flags and Notification.FLAG_ONLY_ALERT_ONCE != 0)
+    }
+
+    @Test
+    fun aLiveUpdateIsMarkedOutOfDateFromItsStaleTimeUntilAFreshUpdate() {
+        client()
+        val subText = { notifications().single().extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty() }
+        val staleAt = System.currentTimeMillis() / 1000 + 600
+        receive(live("start", "Packed", 2) { it.put("staleAt", staleAt) })
+        assertFalse(subText().contains("out of date"))
+
+        // The SDK marks it at that time by itself.
+        val alarms = shadowOf(app.getSystemService(AlarmManager::class.java))
+        val stale = alarms.scheduledAlarms.single { shadowOf(it.operation).savedIntent.action == PushActionReceiver.LIVE_STALE }
+        assertEquals(staleAt * 1000, stale.triggerAtMs)
+
+        // An update that is already late is marked at once.
+        receive(live("update", "On the way", 3) { it.put("staleAt", System.currentTimeMillis() / 1000 - 5) })
+        assertEquals("On the way", notifications().single().extras.getString(Notification.EXTRA_TEXT))
+        assertTrue(subText(), subText().contains("out of date"))
+
+        receive(live("update", "Nearby", 3))
+        assertFalse(subText().contains("out of date"))
+    }
+
+    @Test
     fun aSwipedLiveUpdateIsReportedAndOnlyStartBringsItBack() {
         client()
         receive(live("start", "Placed", 1))

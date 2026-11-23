@@ -166,4 +166,30 @@ class RemoteConfigTest {
         assertEquals(listOf(setOf("home_banner", "theme"), setOf("home_banner")), changes)
         assertEquals("autumn", config.getString("home_banner", null))
     }
+
+    @Test
+    fun aPlanWithoutTheFeatureIsAskedAgainOnlyAfterTheIntervalButALimitedRequestIsRetried() {
+        // 402: the plan has no mobile engagement; the defaults stay and the next launch does not ask again.
+        transport.status = 402
+        val client = client()
+        client.start()
+        drain()
+        assertEquals(1, transport.configRequests.size)
+
+        now += 20 * 60_000
+        client(OneTraceRemoteConfig()).start()
+        drain()
+        assertEquals(1, transport.configRequests.size)
+
+        now += 41 * 60_000
+        transport.status = 429
+        client.appForeground(fromBackground = true)
+        drain()
+        assertEquals(2, transport.configRequests.size)
+
+        // Too many requests is not an answer: asked again on the next start.
+        client.appForeground(fromBackground = true)
+        drain()
+        assertEquals(3, transport.configRequests.size)
+    }
 }

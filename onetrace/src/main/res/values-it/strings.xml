@@ -9,6 +9,7 @@
     <string name="onetrace_live_channel_name">Stato dell\'ordine e della consegna</string>
     <string name="onetrace_live_completed">Completato</string>
     <string name="onetrace_live_step">Passaggio %1$d di %2$d</string>
+    <string name="onetrace_live_stale">non aggiornato</string>
     <string name="onetrace_carousel_previous">Precedente</string>
     <string name="onetrace_carousel_next">Successivo</string>
 </resources>

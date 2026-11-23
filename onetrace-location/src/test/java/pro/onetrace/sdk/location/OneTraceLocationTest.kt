@@ -19,6 +19,7 @@ import org.robolectric.Shadows.shadowOf
 import pro.onetrace.sdk.OneTraceModules
 import pro.onetrace.sdk.location.internal.GeofenceBootReceiver
 import pro.onetrace.sdk.location.internal.GeofenceRegistrar
+import pro.onetrace.sdk.location.internal.GeofenceTransitionReceiver
 import pro.onetrace.sdk.location.internal.GeofenceZone
 import pro.onetrace.sdk.location.internal.Geofences
 import pro.onetrace.sdk.location.internal.LocationSource
@@ -31,9 +32,17 @@ class OneTraceLocationTest {
         var regions = mutableListOf<Region?>()
         var cleared = 0
 
-        override fun register(context: Context, zones: List<GeofenceZone>, region: Region?) {
+        /** Location is off on the phone: the system refuses the zones. */
+        var refuse = false
+
+        override fun register(context: Context, zones: List<GeofenceZone>, region: Region?): Boolean {
+            if (refuse) {
+                return false
+            }
+
             registered.add(zones.map { it.id })
             regions.add(region)
+            return true
         }
 
         override fun clear(context: Context) {
@@ -45,6 +54,8 @@ class OneTraceLocationTest {
     private val registrar = FakeRegistrar()
     private val fetches = mutableListOf<Pair<String, String?>>()
     private val tracked = mutableListOf<Pair<String, Map<String, Any?>>>()
+    private val trackedAt = mutableListOf<Long>()
+    private var status = 200
     private var zones = JSONArray()
     private var version = "v1"
     private var online = true
@@ -63,11 +74,16 @@ class OneTraceLocationTest {
         Geofences.playServices = { true }
         Geofences.initialized = { true }
         Geofences.clock = { now }
-        Geofences.track = { event, properties -> tracked.add(event to properties) }
+        Geofences.track = { event, properties, at ->
+            tracked.add(event to properties)
+            trackedAt.add(at)
+        }
+        Geofences.locationTimeoutMillis = 200
         Geofences.api = { path, etag ->
             fetches.add(path to etag)
             when {
                 !online -> OneTraceModules.Response(0, "", null)
+                status != 200 -> OneTraceModules.Response(status, "", null)
                 etag == version -> OneTraceModules.Response(304, "", version)
                 else -> OneTraceModules.Response(200, JSONObject().put("version", version).put("refreshHours", 12).put("geofences", zones).toString(), version)
             }
@@ -175,5 +191,132 @@ class OneTraceLocationTest {
 
         assertEquals((141..160).toList(), registrar.registered.last().sorted())
         assertTrue(tracked.isEmpty())
+    }
+
+    private fun manyZones() {
+        zones = JSONArray().apply { (1..200).forEach { put(zone(it, 55.0 + it * 0.001)) } }
+        OneTraceLocation.maxMonitored = 20
+    }
+
+    @Test
+    fun moreZonesThanMonitoredAreRegisteredOnceAroundTheNewPositionAfterARestart() {
+        manyZones()
+        grant(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        OneTraceLocation.enableGeofences(app)
+        assertEquals((1..20).toList(), registrar.registered.last().sorted())
+        registrar.registered.clear()
+
+        // After the restart the position comes a moment later, on another thread.
+        val fixes = mutableListOf<Thread>()
+        Geofences.locations = {
+            LocationSource { done -> fixes.add(Thread { Thread.sleep(50); done(55.1505, 37.0) }.apply { start() }) }
+        }
+        GeofenceBootReceiver().onReceive(app, Intent(Intent.ACTION_BOOT_COMPLETED))
+        fixes.forEach { it.join() }
+
+        // One set of zones per selection: never the old place and then the new one (two sets would pass the limit).
+        assertEquals(1, registrar.registered.size)
+        assertEquals((141..160).toList(), registrar.registered.single().sorted())
+    }
+
+    @Test
+    fun withoutAPositionTheZonesAroundTheLastSelectionAreRegisteredOnce() {
+        manyZones()
+        grant(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        OneTraceLocation.enableGeofences(app)
+        registrar.registered.clear()
+
+        Geofences.locations = { LocationSource { } }
+        GeofenceBootReceiver().onReceive(app, Intent(Intent.ACTION_BOOT_COMPLETED))
+
+        assertEquals(listOf((1..20).toList()), registrar.registered.map { it.sorted() })
+    }
+
+    @Test
+    fun theZonesAreRegisteredAfterARestartOfThePhoneWithoutOneTraceInit() {
+        grant(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        OneTraceLocation.enableGeofences(app)
+        registrar.registered.clear()
+
+        // A Flutter or React Native app starts OneTrace from Dart or JavaScript, which does not run for the restart.
+        Geofences.initialized = { false }
+        GeofenceBootReceiver().onReceive(app, Intent(Intent.ACTION_BOOT_COMPLETED))
+
+        assertEquals(listOf(listOf(1, 2, 3)), registrar.registered)
+    }
+
+    @Test
+    fun aTransitionBeforeOneTraceInitIsSentAfterItWithItsTime() {
+        grant(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        OneTraceLocation.enableGeofences(app)
+
+        Geofences.initialized = { false }
+        val enteredAt = now
+        Geofences.transition(app, Geofences.ENTER, listOf("onetrace:2"), 55.01, 37.0)
+        assertTrue(tracked.isEmpty())
+
+        now += 600_000
+        Geofences.initialized = { true }
+        OneTraceLocation.enableGeofences(app)
+
+        assertEquals(listOf("geofence_entered"), tracked.map { it.first })
+        assertEquals(2, tracked.single().second["geofence_id"])
+        assertEquals(listOf(enteredAt), trackedAt)
+
+        // Sent once.
+        Geofences.resumed(app)
+        assertEquals(1, tracked.size)
+    }
+
+    @Test
+    fun afterAReinstallWithRestoredSettingsTheZonesAreRegisteredAgain() {
+        grant(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        OneTraceLocation.enableGeofences(app)
+        // The system knows no zones of a new installation, while Auto Backup restored the settings of the SDK.
+        registrar.registered.clear()
+        now += 3600_000
+
+        assertEquals(GeofenceStatus.ENABLED, OneTraceLocation.enableGeofences(app))
+
+        assertEquals(listOf(listOf(1, 2, 3)), registrar.registered)
+    }
+
+    @Test
+    fun zonesDroppedWithTheLocationTurnedOffAreRegisteredAgainOnceItIsBack() {
+        grant(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        OneTraceLocation.enableGeofences(app)
+        registrar.registered.clear()
+
+        // GEOFENCE_NOT_AVAILABLE: the system removed every zone of the app.
+        registrar.refuse = true
+        GeofenceTransitionReceiver().onReceive(app, Intent().putExtra("gms_error_code", 1000))
+        Geofences.resumed(app)
+        assertTrue(registrar.registered.isEmpty())
+
+        registrar.refuse = false
+        Geofences.resumed(app)
+        assertEquals(listOf(listOf(1, 2, 3)), registrar.registered)
+
+        Geofences.resumed(app)
+        assertEquals(1, registrar.registered.size)
+    }
+
+    @Test
+    fun aPlanWithoutGeofencesIsAskedAgainOnlyAfterTheRefreshInterval() {
+        status = 402
+        grant(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        OneTraceLocation.enableGeofences(app)
+        assertEquals(1, fetches.size)
+
+        now += 3600_000
+        Geofences.resumed(app)
+        OneTraceLocation.enableGeofences(app)
+        assertEquals(1, fetches.size)
+
+        status = 429
+        now += 12 * 3600_000L
+        Geofences.resumed(app)
+        Geofences.resumed(app)
+        assertEquals(3, fetches.size)
     }
 }

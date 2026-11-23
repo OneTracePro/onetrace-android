@@ -80,8 +80,9 @@ internal class Client(
         }
     }
 
-    fun track(event: String, properties: Map<String, Any?>) = run {
-        enqueue("track", JSONObject().put("event", event).put("properties", Json.obj(properties)))
+    /** [timestamp]: when it happened, for an event recorded before the SDK started (a geofence in the background). */
+    fun track(event: String, properties: Map<String, Any?>, timestamp: Long? = null) = run {
+        enqueue("track", JSONObject().put("event", event).put("properties", Json.obj(properties)), timestamp)
         presentInApp(event)
     }
 
@@ -309,11 +310,11 @@ internal class Client(
         }
     }
 
-    private fun enqueue(type: String, fields: JSONObject) {
+    private fun enqueue(type: String, fields: JSONObject, timestamp: Long? = null) {
         fields.put("type", type)
             .put("messageId", UUID.randomUUID().toString())
             .put("anonymousId", storage.anonymousId)
-            .put("timestamp", Json.iso(clock()))
+            .put("timestamp", Json.iso(timestamp ?: clock()))
             .put("context", device.build())
         storage.userId?.let { userId ->
             fields.put("userId", userId)

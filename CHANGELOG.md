@@ -9,6 +9,9 @@
 - The installation reports `push.capabilities` (`rich`, `live_updates`, `silent` — with `onetrace-fcm` or `richPush = true` in the config) and `location.permission`.
 - Remote Config: `OneTrace.remoteConfig` with `getString`, `getBoolean`, `getLong`, `getDouble`, `getJson`, `fetch` and change listeners; fetched at launch and when the app opens at most once per `remoteConfigMinFetchIntervalSeconds` (an hour), right after `identify` and `reset`, with an ETag; stored values offline.
 - New module `onetrace-location`: geofences with Google Play services — `OneTraceLocation.enableGeofences`, `disableGeofences`, `maxMonitored` (90 nearest zones and an update region), `requestLocationPermission()` for the app to call; `geofence_entered`, `geofence_dwelled` and `geofence_exited` with `dwell_seconds`, no coordinates, no re-entry within 30 minutes; registered again after a restart and an app update.
+- Live Updates: an update with «Notify» (`alert`) sounds with a banner, others stay silent; from `staleAt` the notification says «out of date» until the next update.
+- Geofences: one set of zones per selection, registered one after another (never over the limit of 100); a transition before `OneTrace.init` is kept with its time and sent after it; after a restart the zones are registered without `OneTrace.init`; `enableGeofences` registers them at every call (after a reinstall with restored settings); zones dropped with location turned off are registered again on the next resume.
+- A refusal of the platform (402 without the plan's feature, other 4xx but 429) to `/app/config` and `/geofences` is asked again after the interval, not at every launch.
 - `compileSdk` 36; `minSdk` stays 21.
 
 ## 1.2.0 — 2026-11-09

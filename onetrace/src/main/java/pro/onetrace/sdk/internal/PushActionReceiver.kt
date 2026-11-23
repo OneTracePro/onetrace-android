@@ -8,7 +8,7 @@ import pro.onetrace.sdk.OneTrace
 
 /**
  * Taps inside OneTrace notifications that do not open the app: carousel paging, «Close», «Remind me later» and the
- * snoozed notification coming back, a swiped Live Update and the end of its countdown.
+ * snoozed notification coming back, a swiped Live Update, the end of its countdown and its stale time.
  */
 internal class PushActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -29,6 +29,7 @@ internal class PushActionReceiver : BroadcastReceiver() {
             SNOOZED -> RichNotifications.show(context, data, cacheOnly = true)
             LIVE_DISMISSED -> LiveUpdates.dismissed(context, intent.getStringExtra(LiveUpdates.EXTRA_TYPE) ?: return, intent.getStringExtra(LiveUpdates.EXTRA_KEY).orEmpty(), client)
             LIVE_COMPLETED -> LiveUpdates.completed(context, intent.getStringExtra(LiveUpdates.EXTRA_TYPE) ?: return, intent.getStringExtra(LiveUpdates.EXTRA_KEY).orEmpty())
+            LIVE_STALE -> LiveUpdates.stale(context, intent.getStringExtra(LiveUpdates.EXTRA_TYPE) ?: return, intent.getStringExtra(LiveUpdates.EXTRA_KEY).orEmpty())
         }
     }
 
@@ -39,5 +40,6 @@ internal class PushActionReceiver : BroadcastReceiver() {
         const val SNOOZED = "pro.onetrace.sdk.push.SNOOZED"
         const val LIVE_DISMISSED = "pro.onetrace.sdk.push.LIVE_DISMISSED"
         const val LIVE_COMPLETED = "pro.onetrace.sdk.push.LIVE_COMPLETED"
+        const val LIVE_STALE = "pro.onetrace.sdk.push.LIVE_STALE"
     }
 }
