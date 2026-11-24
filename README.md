@@ -32,13 +32,13 @@ and the SDK to the app module:
 
 ```kotlin
 dependencies {
-    implementation("com.github.OneTracePro.onetrace-android:onetrace:1.2.0")
+    implementation("com.github.OneTracePro.onetrace-android:onetrace:1.3.0")
     // Mobile push through Firebase Cloud Messaging:
-    implementation("com.github.OneTracePro.onetrace-android:onetrace-fcm:1.2.0")
+    implementation("com.github.OneTracePro.onetrace-android:onetrace-fcm:1.3.0")
 }
 ```
 
-Rich push, Live Updates, Remote Config and `onetrace-location` are not released yet (see «Unreleased» in the [changelog](CHANGELOG.md)). Until then the Flutter and React Native wrappers take a commit of this branch from JitPack (`com.github.OneTracePro.onetrace-android:onetrace:<short commit>`), or this working copy from the local Maven repository when the app sets the Gradle property `onetrace.mavenLocal=true`:
+The Flutter and React Native wrappers take this working copy from the local Maven repository instead of JitPack when the app sets the Gradle property `onetrace.mavenLocal=true` — publish it first:
 
 ```bash
 ./gradlew :onetrace:publishReleasePublicationToMavenLocal :onetrace-fcm:publishReleasePublicationToMavenLocal :onetrace-location:publishReleasePublicationToMavenLocal
@@ -164,7 +164,7 @@ The SDK fetches the values when the app starts and opens, at most once an hour (
 ## Geofences
 
 ```kotlin
-implementation("com.github.OneTracePro.onetrace-android:onetrace-location:<version>")
+implementation("com.github.OneTracePro.onetrace-android:onetrace-location:1.3.0")
 ```
 
 The module uses Google Play services (`play-services-location`) and declares the location permissions; the core stays without them, so an app without geofences does not get them. Zones come from **Apps → Geofences**: the SDK fetches the list at launch and every 12 hours, monitors the 90 nearest zones (`OneTraceLocation.maxMonitored`; Android allows 100 per app) and selects them again when the device leaves the area around them or the list changes. A removed or switched off zone stops being monitored with the next list.

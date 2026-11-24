@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 — 2026-11-24
 
 - Rich push drawn by the core SDK, without Firebase: `OneTrace.handlePushData(context, data)` draws carousels (paged with «‹ ›», a tap on a card opens its link and reports the click), countdowns (a chronometer, removed at the end) and up to three buttons — open a link, open the app, close, and «Remind me later» as a local notification in 60 or 180 minutes or tomorrow at 9:00. Images download in parallel, up to 10 seconds and 1 MB each; cards without an image are skipped. `onetrace-fcm` now passes every OneTrace message to it.
 - `notificationOpened(context, data, actionId)`: button taps are reported with the button; the memory of the last 50 taps counts a button apart from the notification.
